@@ -1,4 +1,3 @@
-
 * cabal-fix
 
 [[https://hackage.haskell.org/package/cabal-fixes][https://img.shields.io/hackage/v/cabal-fix.svg]]
@@ -6,28 +5,31 @@
 
 ~cabal-fix~ helps fix warts in your cabal files.
 
-* ToDo cabal-fix FIXME
+** ToDo cabal fixes
 
-- [ ] comments
-  - [ ] foo comments
-  - [ ] check all comments
-- [ ] create the app
+- [ ] check individual project diffs
+  - [ ] cabal build & cabal check
+  - [ ] commit
+- [ ] eulerproject cabal
+- [X] insert LICENSE
+- [X] add copyright
+  - [X] based on years
+- [X] revert category
 
-** app steps
+- [X] test the config sucker
+- [X] narrow method for build-deps
+- [X] bugz
+  - [X] description always has an extra line
+  - [X] build-deps not working
 
-- [ ] parse
-- [ ] convert description to free text
-- [ ] remove fields
-  - category
-  - copyright
-- [ ] overright some fields
-  - [ ] license
-  - [ ] license-file
-- [ ] rmove commas
-  - extra-doc-files
-- [ ] postfix commas -> prefix commas
-- [ ] straighten build-deps
-  
+- [X] overwrites
+  - [X] policy
+- [X] fixCommas
+  - [X] commastyle
+- [X] sortFields
+- [X] sortFieldLines
+- [X] removeBlankFields
+- [X] fixBuildDeps
 
 * cabal file listing
 
@@ -38,6 +40,7 @@
 :set -Wno-name-shadowing
 :set -XOverloadedStrings
 putStrLn "ok"
+import Data.Char
 import Cabal.Fix
 import System.Directory
 import Control.Monad
@@ -48,22 +51,84 @@ import Data.Bifunctor
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as B
 import Data.ByteString.Char8 qualified as C
+import Data.TreeDiff
 import Text.Pretty.Simple
+import Data.Algorithm.Diff
 #+end_src
 
 #+RESULTS:
+: [1 of 1] Compiling Cabal.Fix        ( src/Cabal/Fix.hs, interpreted ) [Source file changed]
 : Ok, one module loaded.
 : ok
 
+* Retrieve test cabals
 
-** all the cabals
+#+begin_src haskell :results output
+cs <- getTestCabals
+cs' = Map.fromList cs
+bs = fromMaybe (error "bad lookup") $ Map.lookup "numhask.cabal" cs'
+#+end_src
+
+#+RESULTS:
+
+rerender and save as a file
+
+#+begin_src haskell :results output
+fst <$> cs
+#+end_src
+
+#+RESULTS:
+: ["tonyday567.cabal","research-hackage.cabal","anal.cabal","numhask-array.cabal","chart-svg.cabal","cabal-fix.cabal","numhask-space.cabal","mealy.cabal","formatn.cabal","prettychart.cabal","dotparse.cabal","perf.cabal","numhask.cabal","ephemeral.cabal","box-socket.cabal","iqfeed.cabal","box.cabal","code.cabal","foo.cabal","web-rep.cabal","poker-fold.cabal"]
+
+#+begin_src haskell :results output
+void $ mapM (\(fp,bs) -> BS.writeFile ("/Users/tonyday/haskell/cabal-fix/test/rendered/" <> fp) bs) (second (rerenderCabal (defaultRenderConfig)) <$> cs)
+#+end_src
+
+#+RESULTS:
+
+** rerenderCabal idempotence
+
+#+begin_src haskell :results output
+xs <- getTestCabals
+#+end_src
+
+#+RESULTS:
+
+#+begin_src haskell :results output
+xs' = (second (rerenderCabal (defaultRenderConfig)) <$> xs)
+xs' == (second (rerenderCabal (defaultRenderConfig)) <$> xs')
+#+end_src
+
+#+RESULTS:
+: True
+
+* Diff
+
+#+begin_src haskell :results output
+import Data.Algorithm.DiffOutput
+prettyDiffs $ diffToLineRanges $ getGroupedDiff (C.unpack <$> C.dropWhile isSpace <$> (C.lines bs)) (C.unpack <$> C.dropWhile isSpace <$> (C.lines $ rerenderCabal bs))
+
+#+end_src
+
+#+RESULTS:
+: 1a2
+: 21d21
+: <
+: 35c35,36
+: < import: lang
+: ---
+: import:
+: lang
+: 46a48
+
+* all the cabals
 
 #+begin_src haskell :results output
 allCabalProjects "/Users/tonyday/haskell"
 #+end_src
 
 #+RESULTS:
-: ["numhask","mealy","box","formatn","prettychart","cabal-fix","code","poker-fold","numhask-space","iqfeed","box-socket","numhask-array","tonyday567","foo","web-rep","dotparse","perf","anal","research-hackage","chart-svg","ephemeral"]
+: ["numhask","eulerproject","mealy","box","formatn","prettychart","cabal-fix","code","poker-fold","numhask-space","iqfeed","box-socket","numhask-array","tonyday567","foo","web-rep","baz","dotparse","perf","anal","research-hackage","chart-svg","ephemeral"]
 
 #+begin_src haskell :results output
 cs <- allCabals "/Users/tonyday/haskell"
@@ -73,2500 +138,293 @@ cs <- allCabals "/Users/tonyday/haskell"
 #+RESULTS:
 : cs :: [(String, ByteString)]
 
+** write all the cabals
+
 #+begin_src haskell :results output
-:t second toFields <$> cs 
+cs <- getCabals "/Users/tonyday/haskell/cabal-fix/test/rendered/"
+ns = takeWhile (/='.') . fst <$> cs
+ns
 #+end_src
 
 #+RESULTS:
-: second toFields <$
-: cs :: [(String, [Field Position])]
-
-*** comments
+: ["tonyday567","research-hackage","anal","numhask-array","chart-svg","cabal-fix","numhask-space","mealy","formatn","prettychart","dotparse","perf","numhask","ephemeral","box-socket","iqfeed","box","code","foo","web-rep","poker-fold"]
 
 #+begin_src haskell :results output
-cs' = Map.fromList cs
+sequence_ (zipWith (\n bs -> BS.writeFile ("/Users/tonyday/haskell/" <> n <> "/" <> n <> ".cabal") bs) ns (snd <$> cs))
 #+end_src
 
 #+RESULTS:
 
-#+begin_src haskell :results output
-(Just bs) = Map.lookup "foo" cs' 
-#+end_src
-
-#+RESULTS:
-: <interactive>:1799:1: warning: [GHC-62161] [-Wincomplete-uni-patterns]
-:     Pattern match(es) are non-exhaustive
-:     In a pattern binding:
-:         Patterns of type ‘Maybe ByteString’ not matched: Nothing
+* writing licenses
 
 #+begin_src haskell :results output
-pPrint $ rerenderCabal bs
-#+end_src
-
-#+RESULTS:
-#+begin_example
-"cabal-version: 3.0
-
--- above name
-name:
-    foo
-version:
-    0.1.0.0
-license:
-    BSD-3-Clause
-license-file:
-    LICENSE
-author:
-    Tony Day
-maintainer:
-    tonyday567@gmail.com
-build-type:
-    Simple
-extra-doc-files:
-    CHANGELOG.md
-
-common lang
-    default-language:
-        GHC2021
-
-common warnings
-    ghc-options:
-        -Wall
-
-library
-    -- above import: warning
-    import:
-        warnings
-    import:
-        lang
-    exposed-modules:
-        MyLib
-    build-depends:
-        , base ^>=4.18.0.0
-        , chart-svg             >= 0.4 && < 0.5
-        , containers            ^>= 0.6
-        , deepseq               ^>=1.4
-        , flatparse             >=0.3.5  && <0.6
-    hs-source-dirs:
-        src
-
-executable foo
-    import:
-        warnings
-    main-is:
-        Main.hs
-    build-depends:
-        base ^>=4.18.0.0,
-        foo
-    hs-source-dirs:
-        app
-    default-language:
-        GHC2021
--- at end
-"
-#+end_example
-
-
-
-
-* cabal emitter
-
-#+begin_src haskell :results output
-e <- cabalsEmitter "haskell"
-cs <- toListM <$|> e
-#+end_src
-
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-length cs
-#+end_src
-
-#+RESULTS:
-: 20
-
-#+begin_src haskell :results output
-fieldE = witherE (\(fp,c) -> pure $ either (const Nothing) (Just . (fp,)) (readFields . C.pack $ c)) <$> e
+ps <- allCabalProjects "/Users/tonyday/haskell"
 #+end_src
 
 #+RESULTS:
 
 #+begin_src haskell :results output
-:t fieldE
+ps
 #+end_src
 
 #+RESULTS:
-: fieldE :: Codensity IO (Emitter IO (FilePath, [Field Position]))
+: ["numhask","mealy","box","formatn","prettychart","cabal-fix","code","poker-fold","numhask-space","iqfeed","box-socket","numhask-array","tonyday567","foo","web-rep","baz","dotparse","perf","anal","research-hackage","chart-svg","ephemeral"]
 
-*** counts
-
- #+begin_src haskell :results output
-names <- count_ . mconcat <$> (toListM <$|> fmap (fmap name . snd) <$> fieldE)
-pPrint names
- #+end_src
-
-#+RESULTS:
-#+begin_example
-fromList
-    [
-        ( "author"
-        , 20
-        )
-    ,
-        ( "bug-reports"
-        , 19
-        )
-    ,
-        ( "build-type"
-        , 20
-        )
-    ,
-        ( "cabal-version"
-        , 20
-        )
-    ,
-        ( "category"
-        , 20
-        )
-    ,
-        ( "common"
-        , 45
-        )
-    ,
-        ( "copyright"
-        , 18
-        )
-    ,
-        ( "description"
-        , 20
-        )
-    ,
-        ( "executable"
-        , 12
-        )
-    ,
-        ( "extra-doc-files"
-        , 10
-        )
-    ,
-        ( "homepage"
-        , 20
-        )
-    ,
-        ( "library"
-        , 19
-        )
-    ,
-        ( "license"
-        , 19
-        )
-    ,
-        ( "license-file"
-        , 8
-        )
-    ,
-        ( "maintainer"
-        , 20
-        )
-    ,
-        ( "name"
-        , 20
-        )
-    ,
-        ( "source-repository"
-        , 20
-        )
-    ,
-        ( "synopsis"
-        , 20
-        )
-    ,
-        ( "test-suite"
-        , 1
-        )
-    ,
-        ( "tested-with"
-        , 20
-        )
-    ,
-        ( "version"
-        , 20
-        )
-    ]
-#+end_example
-
-* all fields
-
- #+begin_src haskell :results output
-allFields <- toListM <$|> fieldE
- #+end_src
+#+begin_src haskell :results output
+sequence_ $ fromMaybe (pure ()) . (\p -> BS.writeFile ("/Users/tonyday/haskell/" <> p <> "/" <> "LICENSE") . C.pack . licenseFile "Tony Day" . show <$> (Map.lookup p (Map.fromList yearList))) <$> ps
+#+end_src
 
 #+RESULTS:
 
- #+begin_src haskell :results output
-pPrint $ fst <$> filter (all ((/="bug-reports") . name) . snd) allFields
- #+end_src
+* categories
+
+#+begin_src haskell :results output
+myCats = first (takeWhile (/='.')) . second ((maybe "" (\(Field _ ((FieldLine _ c:_))) -> c)) . listToMaybe . filter (hasName ["category"]) . toFields) <$> cs
+#+end_src
 
 #+RESULTS:
-: [ "/Users/tonyday/haskell/iqfeed/iqfeed.cabal" ]
 
-looking at single fields
-
- #+begin_src haskell :results output
-pPrint $ mconcat $ fmap (\(fp,xs) -> (fp,) <$> (value <$> xs)) $ second (filter ((=="copyright") . name)) <$> allFields
- #+end_src
+#+begin_src haskell :results output
+myCats
+#+end_src
 
 #+RESULTS:
+: [("tonyday567","project"),("research-hackage","project"),("anal","project"),("numhask-array","project"),("chart-svg","charts"),("cabal-fix","project"),("numhask-space","mathematics"),("mealy","folding"),("formatn","Development"),("prettychart","project"),("dotparse","project"),("perf","project"),("numhask","mathematics"),("ephemeral","project"),("box-socket","project"),("iqfeed","API"),("box","project"),("code","project"),("foo",""),("web-rep","web"),("poker-fold","project")]
+
+#+begin_src haskell :results output
+import Data.Ord
+take 100 $ List.sortOn (Down . snd) cats
+#+end_src
+
+#+RESULTS:
+: [("Data",2427),("Web",1990),("Network",1122),("Text",1029),("Development",861),("Control",818),("SYstem",785),("Language",769),("Math",724),("Graphics",629),("Database",539),("Unclassified",487),("Testing",435),("AWS",384),("Data Structures",325),("Game",296),("Parsing",257),("Concurrency",250),("Cloud",227),("Sound",216),("Codec",190),("Google",188),("Cryptography",175),("Distribution",153),("Compilers/Interpreters",147),("FFI",139),("Generics",135),("Algorithms",134),("Bioinformatics",129),("XML",116),("Foreign",114),("JSON",114),("Utils",113),("FRP",109),("Music",106),("Yesod",104),("Console",96),("Prelude",96),("Monads",92),("Natural Language Processing",92),("User Interfaces",92),("Finance",81),("GUI",81),("Numeric",81),("AI",79),("Conduit",76),("Compiler",72),("Numerical",72),("Machine Learning",69),("Hardware",68),("Statistics",66),("Utility",66),("Configuration",65),("Time",65),("Bindings",64),("Servant",64),("Distributed Computing",62),("Logging",62),("Streaming",61),("Algebra",58),("Library",58),("Lenses",56),("Pipes",56),("ACME",55),("Dependent Types",55),("Tools",53),("Theorem Provers",52),("CLI",50),("Debug",48),("Template Haskell",46),("Graphs",44),("Test",44),("Formal Methods",43),("Security",43),("Type System",42),("Game Engine",41),("Logic",41),("API",40),("Reactivity",39),("Filesystem",38),("Parallelism",38),("Records",38),("JavaScript",35),("Nix",35),("Physics",35),("Snap",35),("Application",34),("Compression",33),("Education",33),("Embedded",33),("Enumerator",33),("GHC",33),("Serialization",31),("Code Generation",30),("Crypto",30),("PostgreSQL",30),("Data Mining",28),("Other",28),("Parser",28),("Accelerate",27)]
+
+RESULTS:
 #+begin_example
 [
-    ( "/Users/tonyday/haskell/numhask/numhask.cabal"
-    , [ "Tony Day" ]
+    ( "Data"
+    , 2427
     )
 ,
-    ( "/Users/tonyday/haskell/mealy/mealy.cabal"
-    , [ "Tony Day (c) 2013 - 2022" ]
+    ( "Web"
+    , 1990
     )
 ,
-    ( "/Users/tonyday/haskell/box/box.cabal"
-    , [ "Tony Day (c) 2017" ]
+    ( "Network"
+    , 1122
     )
 ,
-    ( "/Users/tonyday/haskell/formatn/formatn.cabal"
-    , [ "2016 Tony Day" ]
+    ( "Text"
+    , 1029
     )
 ,
-    ( "/Users/tonyday/haskell/prettychart/prettychart.cabal"
-    , [ "Tony Day (c) 2023" ]
+    ( "Development"
+    , 861
     )
 ,
-    ( "/Users/tonyday/haskell/code/code.cabal"
-    , [ "Copyrite, Tony Day, 2023-" ]
+    ( "Control"
+    , 818
     )
 ,
-    ( "/Users/tonyday/haskell/poker-fold/poker-fold.cabal"
-    , [ "Tony Day (c) 2020-2023" ]
+    ( "SYstem"
+    , 785
     )
 ,
-    ( "/Users/tonyday/haskell/numhask-space/numhask-space.cabal"
-    , [ "Tony Day" ]
+    ( "Language"
+    , 769
     )
 ,
-    ( "/Users/tonyday/haskell/iqfeed/iqfeed.cabal"
-    , [ "Tony Day 2014-2021" ]
+    ( "Math"
+    , 724
     )
 ,
-    ( "/Users/tonyday/haskell/box-socket/box-socket.cabal"
-    , [ "Tony Day (c) AfterTimes" ]
+    ( "Graphics"
+    , 629
     )
 ,
-    ( "/Users/tonyday/haskell/numhask-array/numhask-array.cabal"
-    , [ "Tony Day" ]
+    ( "Database"
+    , 539
     )
 ,
-    ( "/Users/tonyday/haskell/tonyday567/tonyday567.cabal"
-    , [ "Tony Day (c) AfterTimes" ]
+    ( "Unclassified"
+    , 487
     )
 ,
-    ( "/Users/tonyday/haskell/foo/foo.cabal"
-    , [ "Copyrite, Tony Day, 2023-" ]
+    ( "Testing"
+    , 435
     )
 ,
-    ( "/Users/tonyday/haskell/dotparse/dotparse.cabal"
-    , [ "Tony Day (c) 2022" ]
+    ( "AWS"
+    , 384
     )
 ,
-    ( "/Users/tonyday/haskell/perf/perf.cabal"
-    , [ "Tony Day" ]
+    ( "Data Structures"
+    , 325
     )
 ,
-    ( "/Users/tonyday/haskell/anal/anal.cabal"
-    , [ "Copyrite, Tony Day, 2023-" ]
+    ( "Game"
+    , 296
     )
 ,
-    ( "/Users/tonyday/haskell/research-hackage/research-hackage.cabal"
-    , [ "Tony Day (c) 2022" ]
+    ( "Parsing"
+    , 257
     )
 ,
-    ( "/Users/tonyday/haskell/chart-svg/chart-svg.cabal"
-    , [ "Tony Day (c) 2017" ]
+    ( "Concurrency"
+    , 250
     )
 ,
-    ( "/Users/tonyday/haskell/ephemeral/ephemeral.cabal"
-    , [ "Tony Day (c) AfterTimes" ]
+    ( "Cloud"
+    , 227
+    )
+,
+    ( "Sound"
+    , 216
+    )
+,
+    ( "Codec"
+    , 190
+    )
+,
+    ( "Google"
+    , 188
+    )
+,
+    ( "Cryptography"
+    , 175
+    )
+,
+    ( "Distribution"
+    , 153
+    )
+,
+    ( "Compilers/Interpreters"
+    , 147
+    )
+,
+    ( "FFI"
+    , 139
+    )
+,
+    ( "Generics"
+    , 135
+    )
+,
+    ( "Algorithms"
+    , 134
+    )
+,
+    ( "Bioinformatics"
+    , 129
+    )
+,
+    ( "XML"
+    , 116
+    )
+,
+    ( "Foreign"
+    , 114
+    )
+,
+    ( "JSON"
+    , 114
+    )
+,
+    ( "Utils"
+    , 113
+    )
+,
+    ( "FRP"
+    , 109
+    )
+,
+    ( "Music"
+    , 106
+    )
+,
+    ( "Yesod"
+    , 104
+    )
+,
+    ( "Console"
+    , 96
+    )
+,
+    ( "Prelude"
+    , 96
+    )
+,
+    ( "Monads"
+    , 92
+    )
+,
+    ( "Natural Language Processing"
+    , 92
+    )
+,
+    ( "User Interfaces"
+    , 92
+    )
+,
+    ( "Finance"
+    , 81
+    )
+,
+    ( "GUI"
+    , 81
+    )
+,
+    ( "Numeric"
+    , 81
+    )
+,
+    ( "AI"
+    , 79
+    )
+,
+    ( "Conduit"
+    , 76
+    )
+,
+    ( "Compiler"
+    , 72
+    )
+,
+    ( "Numerical"
+    , 72
+    )
+,
+    ( "Machine Learning"
+    , 69
+    )
+,
+    ( "Hardware"
+    , 68
     )
 ]
 #+end_example
 
+* manual over-writes
 
 #+begin_src haskell :results output
-yearList = [("numhask",2016),("mealy",2013),("box",2017),("formatn",2016),("prettychart",2023),("code",2023),("poker-fold",2020),("numhask-space",2016),("iqfeed",2014),("box-socket",2017),("numhask-array",2016),("euler",2023),("tonyday567",2020),("foo",2023),("web-rep",2015),("dotparse",2022),("perf",2018),("anal",2023),("research-hackage",2022),("chart-svg",2017),("ephemeral",2020)]
-:t yearList :: [(String, Int)]
-#+end_src
-
-#+RESULTS:
-: yearList :: [(String, Int)] :: [(String, Int)]
-
-* commons
-
- #+begin_src haskell :results output
-pPrint $ collect_ $ fmap (\(x,y) -> (y,x)) $ mconcat $ fmap (\(fp,xs) -> (fp,) <$> xs) $ fmap (second (fmap snd)) $ mconcat $ (\(fp,xs) -> (fp,) . filter ((=="name") . fst) . fmap secName . fst <$> xs) . second (catMaybes . fmap (sec "common")) <$> allFields
- #+end_src
-
-* Done actions
-:LOGBOOK:
-- State "Done"       from "Next"       [2023-07-30 Sun 18:07]
-:END:
-
-- [X] order of fields
-- [X] addFieldLine (if not exist)
-  - ChangeLog.md
-- [X] isBlankField
-- [X] commons are the same
-- [X] multiFieldLines
-- [X] addField (&overwrite)
-  license-file
-- [X] removeField
-  - category
-  - copyright
-- [X] sortFieldLines
-  - build-depends
-- [X] standard LICENSE
-- [X] pretty print a cabal file
-- [X] extra-doc-files don't need commas
-- [X] switch postfix commas to prefix commas
-- [X] manually check tested-with
-  
-* printing
-
-#+begin_src haskell :results output
-fs <- allFields
-:t fs
-#+end_src
-
-#+RESULTS:
-: fs :: [(FilePath, [Field Position])]
-
-#+begin_src haskell :results output
-pPrint $ showFields' (const (CommentAfter [])) (const id) 2 . printFields . snd <$> take 1 fs
-#+end_src
-
-#+RESULTS:
-#+begin_example
-[ "cabal-version:   3.0
-name:            numhask
-version:         0.11.0.2
-synopsis:        A numeric class hierarchy.
-description:
-  This package provides alternative numeric classes over Prelude.
-
-  The numeric class constellation looks somewhat like:
-
-  ![nh](docs/other/nh.svg)
-
-  == Usage
-
-  >>
-{-# LANGUAGE GHC2021 #-}
-  >>
-{-# LANGUAGE RebindableSyntax #-}
-  >>
-import NumHask.Prelude
-
-  See "NumHask" for a detailed overview.
-
-category:        mathematics
-homepage:        https://github.com/tonyday567/numhask#readme
-bug-reports:     https://github.com/tonyday567/numhask/issues
-author:          Tony Day
-maintainer:      tonyday567@gmail.com
-copyright:       Tony Day
-license:         BSD-3-Clause
-license-file:    LICENSE
-build-type:      Simple
-tested-with:
-  GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.8 || ==9.4.5 || ==9.6.2
-
-extra-doc-files:
-  other/*.svg,
-  ChangeLog.md
-
-source-repository head
-  type:     git
-  location: https://github.com/tonyday567/numhask
-  subdir:   numhask
-
-common ghc2021-stanza
-  if impl ( ghc >= 9.2 )
-    default-language: GHC2021
-
-  if impl ( ghc < 9.2 )
-    default-language:   Haskell2010
-    default-extensions:
-      BangPatterns
-      BinaryLiterals
-      ConstrainedClassMethods
-      ConstraintKinds
-      DeriveDataTypeable
-      DeriveFoldable
-      DeriveFunctor
-      DeriveGeneric
-      DeriveLift
-      DeriveTraversable
-      DoAndIfThenElse
-      EmptyCase
-      EmptyDataDecls
-      EmptyDataDeriving
-      ExistentialQuantification
-      ExplicitForAll
-      FlexibleContexts
-      FlexibleInstances
-      ForeignFunctionInterface
-      GADTSyntax
-      GeneralisedNewtypeDeriving
-      HexFloatLiterals
-      ImplicitPrelude
-      InstanceSigs
-      KindSignatures
-      MonomorphismRestriction
-      MultiParamTypeClasses
-      NamedFieldPuns
-      NamedWildCards
-      NumericUnderscores
-      PatternGuards
-      PolyKinds
-      PostfixOperators
-      RankNTypes
-      RelaxedPolyRec
-      ScopedTypeVariables
-      StandaloneDeriving
-      StarIsType
-      TraditionalRecordSyntax
-      TupleSections
-      TypeApplications
-      TypeOperators
-      TypeSynonymInstances
-
-  if impl ( ghc < 9.2 ) && impl ( ghc >= 8.10 )
-    default-extensions:
-      ImportQualifiedPost
-      StandaloneKindSignatures
-
-common ghc-options-stanza
-  ghc-options:
-    -Wall
-    -Wcompat
-    -Wincomplete-record-updates
-    -Wincomplete-uni-patterns
-    -Wredundant-constraints
-    -Widentities
-    -Wpartial-fields
-
-  if impl ( ghc >= 8.8 )
-    ghc-options:
-      -fwrite-ide-info
-      -hiedir=.hie
-
-library
-  import:             ghc2021-stanza
-  import:             ghc-options-stanza
-  hs-source-dirs:     src
-  default-extensions: RebindableSyntax
-
-  if impl ( ghc >= 8.10 )
-    default-extensions: NoImportQualifiedPost
-
-  build-depends:
-    base >=4.7 && <5,
-    QuickCheck >=2.14 && <3
-
-  exposed-modules:
-    NumHask
-    NumHask.Algebra.Additive
-    NumHask.Algebra.Field
-    NumHask.Algebra.Group
-    NumHask.Algebra.Lattice
-    NumHask.Algebra.Metric
-    NumHask.Algebra.Action
-    NumHask.Algebra.Multiplicative
-    NumHask.Algebra.Ring
-    NumHask.Data.Complex
-    NumHask.Data.Integral
-    NumHask.Data.Rational
-    NumHask.Exception
-    NumHask.Prelude
-
-  other-modules:
-" ]
-#+end_example
-
-** description debug example
-
-#+begin_src haskell :results output
-t1 = head $ filter ((=="description") . name) $ snd $ head fs
+cfg = defaultRenderConfig {replaceCategory = True, replaceCopyright = True}
 #+end_src
 
 #+RESULTS:
 
 #+begin_src haskell :results output
-(Field _ t2) = t1
-:t t2
-#+end_src
-
-#+RESULTS:
-: <interactive>:411:1: warning: [GHC-62161] [-Wincomplete-uni-patterns]
-:     Pattern match(es) are non-exhaustive
-:     In a pattern binding:
-:         Patterns of type ‘Field Position’ not matched: Section _ _ _
-: t2 :: [FieldLine Position]
-
-** parse check
-check if any parse errors:
-
-#+begin_src haskell :results output
-import Data.Either
-toListM <$|> witherE (\(fp,x) -> pure $ bool Nothing (Just (fp,x)) (isLeft x)) . (fmap (second (readFields . C.pack))) <$> e
-#+end_src
-
-#+RESULTS:
-: []
-
-* commas
-
-#+begin_src haskell :results output
-fs <- allFields
-:t fs
-#+end_src
-
-#+RESULTS:
-: fs :: [(FilePath, [Field Position])]
-
-#+begin_src haskell :results output
-length . snd <$> second (filter (anyField hasPrefixComma)) <$> fs
-#+end_src
-
-#+RESULTS:
-: [0,1,1,1,0,1,0,0,1,6,2,1,0,0,2,1,0,0,0,0,0]
-
-#+begin_src haskell :results output
-length . snd <$> second (filter (anyField hasPrefixComma0)) <$> fs
-#+end_src
-
-#+RESULTS:
-: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
-
-#+begin_src haskell :results output
-length . snd <$> second (filter (anyField hasPostfixComma)) <$> fs
-#+end_src
-
-#+RESULTS:
-: [2,0,0,0,2,1,0,3,0,0,0,0,1,2,0,0,2,1,1,2,1]
-
-#+begin_src haskell :results output
-anyField hasPostfixComma <$> (filter ((=="extra-doc-files") . name) $ snd $ head fs)
-#+end_src
-
-#+RESULTS:
-: [False]
-
-#+begin_src haskell :results output
-(Field _ (fl1:_)) = head (filter ((=="extra-doc-files") . name) $ snd $ head fs)
-#+end_src
-
-#+RESULTS:
-: <interactive>:487:1: warning: [GHC-62161] [-Wincomplete-uni-patterns]
-:     Pattern match(es) are non-exhaustive
-:     In a pattern binding:
-:         Patterns of type ‘Field Position’ not matched:
-:             Section _ _ _
-:             Field _ []
-
-#+begin_src haskell :results output
-hasPostfixComma fl1
-#+end_src
-
-#+begin_src haskell :results output
-fst <$> fs
-#+end_src
-
-#+RESULTS:
-: ["/Users/tonyday/haskell/numhask/numhask.cabal","/Users/tonyday/haskell/mealy/mealy.cabal","/Users/tonyday/haskell/box/box.cabal","/Users/tonyday/haskell/formatn/formatn.cabal","/Users/tonyday/haskell/prettychart/prettychart.cabal","/Users/tonyday/haskell/code/code.cabal","/Users/tonyday/haskell/poker-fold/poker-fold.cabal","/Users/tonyday/haskell/numhask-space/numhask-space.cabal","/Users/tonyday/haskell/iqfeed/iqfeed.cabal","/Users/tonyday/haskell/box-socket/box-socket.cabal","/Users/tonyday/haskell/numhask-array/numhask-array.cabal","/Users/tonyday/haskell/tonyday567/tonyday567.cabal","/Users/tonyday/haskell/foo/foo.cabal","/Users/tonyday/haskell/cabal-fixes/cabal-fixes.cabal","/Users/tonyday/haskell/web-rep/web-rep.cabal","/Users/tonyday/haskell/dotparse/dotparse.cabal","/Users/tonyday/haskell/perf/perf.cabal","/Users/tonyday/haskell/anal/anal.cabal","/Users/tonyday/haskell/research-hackage/research-hackage.cabal","/Users/tonyday/haskell/chart-svg/chart-svg.cabal","/Users/tonyday/haskell/ephemeral/ephemeral.cabal"]
-
-#+begin_src haskell :results output
-second (fmap name) <$> (filter (([]/=) . snd) $ second (mconcat . fmap (whichFields hasPostfixComma)) <$> fs)
-#+end_src
-
-#+RESULTS:
-: [("/Users/tonyday/haskell/numhask/numhask.cabal",["extra-doc-files","build-depends"]),("/Users/tonyday/haskell/prettychart/prettychart.cabal",["extra-doc-files","build-depends"]),("/Users/tonyday/haskell/cabal-fix/cabal-fix.cabal",["build-depends"]),("/Users/tonyday/haskell/poker-fold/poker-fold.cabal",["build-depends","build-depends","build-depends"]),("/Users/tonyday/haskell/tonyday567/tonyday567.cabal",["build-depends"]),("/Users/tonyday/haskell/foo/foo.cabal",["build-depends","build-depends"]),("/Users/tonyday/haskell/perf/perf.cabal",["build-depends","build-depends"]),("/Users/tonyday/haskell/anal/anal.cabal",["build-depends"]),("/Users/tonyday/haskell/research-hackage/research-hackage.cabal",["build-depends"]),("/Users/tonyday/haskell/chart-svg/chart-svg.cabal",["build-depends","build-depends"]),("/Users/tonyday/haskell/ephemeral/ephemeral.cabal",["build-depends"])]
-
-#+begin_src haskell :results output
-:t take 1 fs
-#+end_src
-
-#+RESULTS:
-: take 1 fs :: [(FilePath, [Field Position])]
-
-#+begin_src haskell :results output
-renderCabal = showFields'' (const (CommentAfter [])) (const id) 2 . printFields
-#+end_src
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-pPrint $ renderCabal . snd <$> second (fmap ((prefixCommas ((=="build-depends") . name)) . (noCommas ((=="extra-doc-files") . name)))) <$> (take 1 fs)
-#+end_src
-
-#+RESULTS:
-#+begin_example
-[ "cabal-version:   3.0
-name:            numhask
-version:         0.11.0.2
-synopsis:        A numeric class hierarchy.
-description:
-  This package provides alternative numeric classes over Prelude.
-
-  The numeric class constellation looks somewhat like:
-
-  ![nh](docs/other/nh.svg)
-
-  == Usage
-
-  >>
-{-# LANGUAGE GHC2021 #-}
-  >>
-{-# LANGUAGE RebindableSyntax #-}
-  >>
-import NumHask.Prelude
-
-  See "NumHask" for a detailed overview.
-category:        mathematics
-homepage:        https://github.com/tonyday567/numhask#readme
-bug-reports:     https://github.com/tonyday567/numhask/issues
-author:          Tony Day
-maintainer:      tonyday567@gmail.com
-copyright:       Tony Day
-license:         BSD-3-Clause
-license-file:    LICENSE
-build-type:      Simple
-tested-with:
-  GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.8 || ==9.4.5 || ==9.6.2
-extra-doc-files:
-  other/*.svg
-  ChangeLog.md
-source-repository head
-  type:     git
-  location: https://github.com/tonyday567/numhask
-  subdir:   numhask
-common ghc2021-stanza
-  if impl ( ghc >= 9.2 )
-    default-language: GHC2021
-  if impl ( ghc < 9.2 )
-    default-language:   Haskell2010
-    default-extensions:
-      BangPatterns
-      BinaryLiterals
-      ConstrainedClassMethods
-      ConstraintKinds
-      DeriveDataTypeable
-      DeriveFoldable
-      DeriveFunctor
-      DeriveGeneric
-      DeriveLift
-      DeriveTraversable
-      DoAndIfThenElse
-      EmptyCase
-      EmptyDataDecls
-      EmptyDataDeriving
-      ExistentialQuantification
-      ExplicitForAll
-      FlexibleContexts
-      FlexibleInstances
-      ForeignFunctionInterface
-      GADTSyntax
-      GeneralisedNewtypeDeriving
-      HexFloatLiterals
-      ImplicitPrelude
-      InstanceSigs
-      KindSignatures
-      MonomorphismRestriction
-      MultiParamTypeClasses
-      NamedFieldPuns
-      NamedWildCards
-      NumericUnderscores
-      PatternGuards
-      PolyKinds
-      PostfixOperators
-      RankNTypes
-      RelaxedPolyRec
-      ScopedTypeVariables
-      StandaloneDeriving
-      StarIsType
-      TraditionalRecordSyntax
-      TupleSections
-      TypeApplications
-      TypeOperators
-      TypeSynonymInstances
-  if impl ( ghc < 9.2 ) && impl ( ghc >= 8.10 )
-    default-extensions:
-      ImportQualifiedPost
-      StandaloneKindSignatures
-common ghc-options-stanza
-  ghc-options:
-    -Wall
-    -Wcompat
-    -Wincomplete-record-updates
-    -Wincomplete-uni-patterns
-    -Wredundant-constraints
-    -Widentities
-    -Wpartial-fields
-  if impl ( ghc >= 8.8 )
-    ghc-options:
-      -fwrite-ide-info
-      -hiedir=.hie
-library
-  import:             ghc2021-stanza
-  import:             ghc-options-stanza
-  hs-source-dirs:     src
-  default-extensions: RebindableSyntax
-  if impl ( ghc >= 8.10 )
-    default-extensions: NoImportQualifiedPost
-  build-depends:
-    , base >=4.7 && <5
-    , QuickCheck >=2.14 && <3
-  exposed-modules:
-    NumHask
-    NumHask.Algebra.Additive
-    NumHask.Algebra.Field
-    NumHask.Algebra.Group
-    NumHask.Algebra.Lattice
-    NumHask.Algebra.Metric
-    NumHask.Algebra.Action
-    NumHask.Algebra.Multiplicative
-    NumHask.Algebra.Ring
-    NumHask.Data.Complex
-    NumHask.Data.Integral
-    NumHask.Data.Rational
-    NumHask.Exception
-    NumHask.Prelude
-  other-modules:
-" ]
-#+end_example
-
-
-check
-
-#+begin_src haskell :results output
-length . snd <$> second (filter (anyField hasPostfixComma)) <$> second (fmap ((prefixCommas ((=="build-depends") . name)) . (noCommas ((=="extra-doc-files") . name)))) <$> fs
-#+end_src
-
-#+RESULTS:
-: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
-
-* isBlankField
-
-#+begin_src haskell :results output
-filter (([] /=) . snd) $ second (fmap name . mconcat . fmap blankFields) <$> fs
-#+end_src
-
-#+RESULTS:
-: [("/Users/tonyday/haskell/numhask/numhask.cabal",["other-modules"]),("/Users/tonyday/haskell/formatn/formatn.cabal",["default-extensions","other-modules"]),("/Users/tonyday/haskell/cabal-fix/cabal-fix.cabal",["default-extensions"]),("/Users/tonyday/haskell/code/code.cabal",["default-extensions"]),("/Users/tonyday/haskell/tonyday567/tonyday567.cabal",["build-depends"]),("/Users/tonyday/haskell/research-hackage/research-hackage.cabal",["default-extensions"])]
-
-* removeFields
-
-#+begin_src haskell :results output
-filter (([] /=) . snd) $ second (fmap name . mconcat . fmap blankFields) <$> second removeFieldss (\x -> isBlankField x || ("category" == name x) || ("copyright" == name x)) <$> fs
-#+end_src
-
-#+RESULTS:
-: []
-
-* fieldNames
-
-#+begin_src haskell :results output
-pPrint $ count_ $ fst <$> (mconcat $ (\(fp,xs) -> (,fp) <$> xs) <$> second (mconcat . fmap fieldNames) <$> fs)
-#+end_src
-
-#+RESULTS:
-#+begin_example
-fromList
-    [
-        ( "author"
-        , 21
-        )
-    ,
-        ( "bug-reports"
-        , 20
-        )
-    ,
-        ( "build-depends"
-        , 36
-        )
-    ,
-        ( "build-type"
-        , 21
-        )
-    ,
-        ( "cabal-version"
-        , 21
-        )
-    ,
-        ( "category"
-        , 21
-        )
-    ,
-        ( "copyright"
-        , 19
-        )
-    ,
-        ( "default-extensions"
-        , 53
-        )
-    ,
-        ( "default-language"
-        , 45
-        )
-    ,
-        ( "description"
-        , 21
-        )
-    ,
-        ( "exposed-modules"
-        , 20
-        )
-    ,
-        ( "extra-doc-files"
-        , 12
-        )
-    ,
-        ( "ghc-options"
-        , 37
-        )
-    ,
-        ( "homepage"
-        , 21
-        )
-    ,
-        ( "hs-source-dirs"
-        , 35
-        )
-    ,
-        ( "import"
-        , 74
-        )
-    ,
-        ( "license"
-        , 20
-        )
-    ,
-        ( "license-file"
-        , 8
-        )
-    ,
-        ( "location"
-        , 21
-        )
-    ,
-        ( "main-is"
-        , 15
-        )
-    ,
-        ( "maintainer"
-        , 21
-        )
-    ,
-        ( "name"
-        , 21
-        )
-    ,
-        ( "other-modules"
-        , 2
-        )
-    ,
-        ( "subdir"
-        , 1
-        )
-    ,
-        ( "synopsis"
-        , 21
-        )
-    ,
-        ( "tested-with"
-        , 21
-        )
-    ,
-        ( "type"
-        , 23
-        )
-    ,
-        ( "version"
-        , 21
-        )
-    ]
-#+end_example
-
-* addField
-
-
-#+begin_src haskell :results output
-licenseF = Field (Name (Position 0 1) "license") [FieldLine (Position 0 21) "BSD-3-Clause"]
-licenseFileF = Field (Name (Position 0 1) "license-file") [FieldLine (Position 0 21) "LICENSE"]
+void $ mapM (\(fp,bs) -> BS.writeFile ("/Users/tonyday/haskell/cabal-fix/test/rendered/" <> fp) bs) (second (rerenderCabal cfg) <$> cs)
 #+end_src
 
 #+RESULTS:
 
 
-#+begin_src haskell :results output
-pPrint $ renderCabal . snd <$> second (addField AddReplace licenseFileF . addField AddReplace licenseF) <$> take 1 fs
-#+end_src
-
-* multi-space
-
-- what has commas. only build-depends
-- are they all of length 1? yes
+* individual directory cabal
 
 #+begin_src haskell :results output
-fs <- allFields
-:t fs
+fp = "/Users/tonyday/haskell/eulerproject/eulerproject.cabal"
+cfg = defaultRenderConfig
+rerenderFile fp cfg
 #+end_src
 
 #+RESULTS:
-: fs :: [(FilePath, [Field Position])]
-
-#+begin_src haskell :results output
-pPrint $ take 40 $ (\xs -> [e| (Left e) <- xs]) $ parseOK depP <$> (mconcat $ snd <$> (second (mconcat . fmap fieldValues' . mconcat . fmap (whichFields (\x -> B.isPrefixOf ", " (fieldLineBS x) || B.isSuffixOf "," (fieldLineBS x)))) <$> fs))
-#+end_src
-
-#+RESULTS:
-: [ "other/*.svg,"
-: , "ChangeLog.md"
-: , "other/*.svg,"
-: , "readme.org,"
-: , "ChangeLog.md"
-: ]
-
-#+begin_src haskell :results output
-deps = (((\xs -> [e| (Right e) <- xs]) $ parseOK depP <$> (mconcat $ snd <$> (second (mconcat . fmap fieldValues' . mconcat . fmap (whichFields (\x -> B.isPrefixOf ", " (fieldLineBS x) || B.isSuffixOf "," (fieldLineBS x)))) <$> fs))))
-#+end_src
-
-#+RESULTS:
-
-sorted formatted list
-
-#+begin_src haskell :results output
-pPrint $ List.sort $ printDep <$> deps
-#+end_src
-
-#+RESULTS:
-#+begin_example
-[ "Cabal"
-, "Cabal-syntax"
-, "Color ^>=0.3"
-, "QuickCheck >=2.14 && <3"
-, "QuickCheck >=2.14.2 && <2.15"
-, "adjunctions >=4.0 && <5"
-, "adjunctions >=4.0 && <5"
-, "adjunctions >=4.4 && <4.5"
-, "adjunctions ^>=4.4"
-, "adjunctions ^>=4.4"
-, "algebraic-graphs"
-, "algebraic-graphs >=0.6 && <0.8"
-, "async ^>=2.2"
-, "async ^>=2.2"
-, "async ^>=2.2.3"
-, "async ^>=2.2.4"
-, "async ^>=2.2.4"
-, "attoparsec >=0.13.2 && <0.15"
-, "attoparsec ^>=0.14"
-, "base >=4 && <5"
-, "base >=4 && <5"
-, "base >=4.11 && <5"
-, "base >=4.12 && <5"
-, "base >=4.12 && <5"
-, "base >=4.12 && <5"
-, "base >=4.12 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base >=4.7 && <5"
-, "base ^>=4.18.0.0"
-, "base ^>=4.18.0.0"
-, "bifunctors"
-, "bifunctors >=5.5.11 && <5.7"
-, "bifunctors >=5.5.11 && <5.7"
-, "box"
-, "box >=0.9"
-, "box >=0.9 && <0.10"
-, "box >=0.9 && <0.10"
-, "box >=0.9 && <0.10"
-, "box >=0.9 && <0.10"
-, "box ^>=0.9"
-, "box-socket"
-, "box-socket ^>=0.4"
-, "bytestring"
-, "bytestring"
-, "bytestring >=0.10 && <0.12"
-, "bytestring >=0.11 && <0.13"
-, "bytestring >=0.11.3 && <0.13"
-, "bytestring >=0.11.3 && <0.13"
-, "bytestring >=0.11.3 && <0.13"
-, "bytestring >=0.11.3 && <0.13"
-, "bytestring >=0.11.3 && <0.13"
-, "bytestring >=0.11.3 && <0.13"
-, "cabal-fix"
-, "chart-svg"
-, "chart-svg"
-, "chart-svg >=0.3 && <0.5"
-, "chart-svg >=0.4 && <0.5"
-, "chart-svg >=0.4 && <0.5"
-, "chart-svg >=0.4 && <0.5"
-, "chart-svg >=0.4 && <0.5"
-, "chart-svg >=0.4 && <0.5"
-, "clay >=0.13 && <0.15"
-, "containers"
-, "containers"
-, "containers"
-, "containers >=0.6 && <0.7"
-, "containers >=0.6 && <0.7"
-, "containers >=0.6 && <0.7"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6"
-, "containers ^>=0.6.2"
-, "contravariant ^>=1.5"
-, "cryptonite"
-, "cubicbezier ^>=0.6"
-, "deepseq >=1.4.4 && <1.5"
-, "deepseq >=1.4.4 && <1.5"
-, "deepseq >=1.4.8 && <1.5"
-, "deepseq >=1.4.8 && <1.5"
-, "deepseq ^>=1.4"
-, "deepseq ^>=1.4"
-, "deepseq ^>=1.4"
-, "directory"
-, "directory"
-, "distributive >=0.2.2 && <1"
-, "distributive >=0.4 && <0.7"
-, "distributive >=0.6 && <0.7"
-, "dlist ^>=1.0"
-, "dotparse"
-, "exceptions ^>=0.10"
-, "exceptions ^>=0.10"
-, "fgl"
-, "flatparse"
-, "flatparse"
-, "flatparse"
-, "flatparse >=0.3.2 && <0.6"
-, "flatparse >=0.3.5 && <0.6"
-, "flatparse >=0.3.5 && <0.6"
-, "flatparse >=0.4 && <0.6"
-, "flatparse >=0.4 && <0.6"
-, "flatparse >=0.4 && <0.6"
-, "foldl ^>=1.4"
-, "foo"
-, "formatn"
-, "formatn >=0.2.1 && <0.4"
-, "formatn >=0.2.1 && <0.4"
-, "formatn >=0.3 && <0.4"
-, "formatn >=0.3 && <0.4"
-, "formatn >=0.3 && <0.4"
-, "free >=5.2 && <5.3"
-, "gauge ^>=0.2.5"
-, "iqfeed"
-, "iqfeed"
-, "iqfeed"
-, "iqfeed"
-, "iqfeed"
-, "kan-extensions ^>=5.2"
-, "language-javascript >=0.6.0 && <0.8"
-, "lucid"
-, "lucid >=2.9 && <2.12"
-, "lucid >=2.9 && <2.12"
-, "lucid >=2.9 && <2.12"
-, "lucid >=2.9 && <2.12"
-, "mealy"
-, "mealy >=0.4 && <0.5"
-, "mealy >=0.4 && <0.5"
-, "mtl"
-, "mtl >=2.2.2 && <2.4"
-, "mtl >=2.2.2 && <2.4"
-, "mtl >=2.2.2 && <2.4"
-, "mtl >=2.2.2 && <2.4"
-, "mtl >=2.2.2 && <2.4"
-, "mtl >=2.2.2 && <2.4"
-, "mtl >=2.2.2 && <2.4"
-, "mtl >=2.2.2 && <2.4"
-, "mwc-probability ^>=2.3.1"
-, "network ^>=3.1"
-, "network-simple ^>=0.4"
-, "network-simple ^>=0.4"
-, "numhask"
-, "numhask >=0.10 && <0.12"
-, "numhask >=0.11 && <0.12"
-, "numhask >=0.11 && <0.12"
-, "numhask >=0.11 && <0.12"
-, "numhask >=0.11.0 && <0.12"
-, "numhask ^>=0.11"
-, "numhask ^>=0.11"
-, "numhask ^>=0.11"
-, "numhask ^>=0.11"
-, "numhask-array >=0.10 && <0.12"
-, "numhask-array >=0.10.1 && <0.12"
-, "numhask-array ^>=0.11"
-, "numhask-space >=0.10 && <0.12"
-, "numhask-space >=0.10 && <0.12"
-, "numhask-space ^>=0.11"
-, "numhask-space ^>=0.11"
-, "optics-core"
-, "optics-core"
-, "optics-core ^>=0.4"
-, "optics-core ^>=0.4"
-, "optics-core ^>=0.4"
-, "optics-core ^>=0.4"
-, "optics-core ^>=0.4"
-, "optics-core ^>=0.4"
-, "optics-core ^>=0.4"
-, "optics-core ^>=0.4"
-, "optics-extra ^>=0.4"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-generic >=1.3 && <1.5"
-, "perf"
-, "perf >=0.10 && <0.12"
-, "perf >=0.10.1 && <0.12"
-, "poker-fold"
-, "poker-fold"
-, "pretty >=1.1.3 && <1.1.4"
-, "pretty-simple"
-, "prettychart"
-, "prettyprinter >=1.7.1 && <1.8"
-, "primitive >=0.7.2 && <0.9"
-, "process ^>=1.6"
-, "process-extras ^>=0.7.4"
-, "profunctors"
-, "profunctors >=5.6.2 && <5.7"
-, "profunctors ^>=5.6"
-, "profunctors ^>=5.6.2"
-, "profunctors ^>=5.6.2"
-, "profunctors ^>=5.6.2"
-, "random ^>=1.2"
-, "random ^>=1.2"
-, "random ^>=1.2"
-, "random ^>=1.2.1"
-, "rdtsc ^>=1.3"
-, "recursion-schemes ^>=5.2.2"
-, "scotty >=0.11.5 && <0.13"
-, "semigroupoids >=5 && <6.1"
-, "semigroupoids >=5.3 && <6.1"
-, "stm ^>=2.5.1"
-, "streamly >=0.8 && <0.10"
-, "streamly-archive >=0.1 && <0.3"
-, "streamly-core >=0.1 && <0.2"
-, "string-interpolate >=0.3 && <0.4"
-, "string-interpolate ^>=0.3"
-, "string-interpolate ^>=0.3"
-, "string-interpolate ^>=0.3"
-, "string-interpolate ^>=0.3"
-, "string-interpolate ^>=0.3"
-, "tasty >=1.2 && <1.5"
-, "tasty-golden ^>=2.3.1.1"
-, "tdigest >=0.2.1 && <0.4"
-, "tdigest >=0.2.1 && <4"
-, "template-haskell >=2.16 && <2.21"
-, "template-haskell >=2.16 && <2.21"
-, "text"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2 && <2.1"
-, "text >=1.2.3 && <2.1"
-, "text >=1.2.3 && <2.1"
-, "text >=1.2.3.1 && <3"
-, "text >=1.2.4 && <2.1"
-, "text >=1.2.4 && <2.1"
-, "these >=1.1 && <1.3"
-, "these >=1.1.1 && <1.3"
-, "time"
-, "time >=1.9 && <1.13"
-, "time >=1.9 && <1.13"
-, "time >=1.9 && <1.13"
-, "time >=1.9 && <1.14"
-, "time >=1.9 && <2"
-, "time >=1.9.1 && <1.13"
-, "transformers >=0.5.6 && <0.6.2"
-, "tree-diff >=0.3 && <0.4"
-, "tree-diff >=0.3 && <0.4"
-, "unordered-containers ^>=0.2"
-, "unordered-containers ^>=0.2.10"
-, "vector >=0.10 && <0.14"
-, "vector >=0.12 && <0.14"
-, "vector >=0.12.3 && <0.14"
-, "vector >=0.12.3 && <0.14"
-, "vector >=0.12.3 && <0.14"
-, "vector >=0.12.3 && <0.14"
-, "vector-algorithms >=0.8.0 && <0.10"
-, "vector-algorithms >=0.9.0 && <0.10"
-, "vector-mmap >=0.0.3 && <0.1"
-, "wai-middleware-static ^>=0.9"
-, "wai-websockets ^>=3.0.1.2"
-, "web-rep"
-, "web-rep"
-, "web-rep >=0.10.1 && <0.11"
-, "web-rep >=0.10.1 && <0.11"
-, "web-rep >=0.10.1 && <0.11"
-, "websockets ^>=0.12"
-, "websockets ^>=0.12"
-, "yaya >=0.4.2 && <0.5"
-]
-#+end_example
-
-#+begin_src haskell :results output
-pPrint $ count_ $ dep <$> deps
-#+end_src
-
-#+RESULTS:
-#+begin_example
-fromList
-    [
-        ( "Cabal"
-        , 1
-        )
-    ,
-        ( "Cabal-syntax"
-        , 1
-        )
-    ,
-        ( "Color"
-        , 1
-        )
-    ,
-        ( "QuickCheck"
-        , 2
-        )
-    ,
-        ( "adjunctions"
-        , 5
-        )
-    ,
-        ( "algebraic-graphs"
-        , 2
-        )
-    ,
-        ( "async"
-        , 5
-        )
-    ,
-        ( "attoparsec"
-        , 2
-        )
-    ,
-        ( "base"
-        , 30
-        )
-    ,
-        ( "bifunctors"
-        , 3
-        )
-    ,
-        ( "box"
-        , 7
-        )
-    ,
-        ( "box-socket"
-        , 2
-        )
-    ,
-        ( "bytestring"
-        , 10
-        )
-    ,
-        ( "cabal-fix"
-        , 1
-        )
-    ,
-        ( "chart-svg"
-        , 8
-        )
-    ,
-        ( "clay"
-        , 1
-        )
-    ,
-        ( "containers"
-        , 16
-        )
-    ,
-        ( "contravariant"
-        , 1
-        )
-    ,
-        ( "cryptonite"
-        , 1
-        )
-    ,
-        ( "cubicbezier"
-        , 1
-        )
-    ,
-        ( "deepseq"
-        , 7
-        )
-    ,
-        ( "directory"
-        , 2
-        )
-    ,
-        ( "distributive"
-        , 3
-        )
-    ,
-        ( "dlist"
-        , 1
-        )
-    ,
-        ( "dotparse"
-        , 1
-        )
-    ,
-        ( "exceptions"
-        , 2
-        )
-    ,
-        ( "fgl"
-        , 1
-        )
-    ,
-        ( "flatparse"
-        , 9
-        )
-    ,
-        ( "foldl"
-        , 1
-        )
-    ,
-        ( "foo"
-        , 1
-        )
-    ,
-        ( "formatn"
-        , 6
-        )
-    ,
-        ( "free"
-        , 1
-        )
-    ,
-        ( "gauge"
-        , 1
-        )
-    ,
-        ( "iqfeed"
-        , 5
-        )
-    ,
-        ( "kan-extensions"
-        , 1
-        )
-    ,
-        ( "language-javascript"
-        , 1
-        )
-    ,
-        ( "lucid"
-        , 5
-        )
-    ,
-        ( "mealy"
-        , 3
-        )
-    ,
-        ( "mtl"
-        , 9
-        )
-    ,
-        ( "mwc-probability"
-        , 1
-        )
-    ,
-        ( "network"
-        , 1
-        )
-    ,
-        ( "network-simple"
-        , 2
-        )
-    ,
-        ( "numhask"
-        , 10
-        )
-    ,
-        ( "numhask-array"
-        , 3
-        )
-    ,
-        ( "numhask-space"
-        , 4
-        )
-    ,
-        ( "optics-core"
-        , 10
-        )
-    ,
-        ( "optics-extra"
-        , 1
-        )
-    ,
-        ( "optparse-applicative"
-        , 8
-        )
-    ,
-        ( "optparse-generic"
-        , 1
-        )
-    ,
-        ( "perf"
-        , 3
-        )
-    ,
-        ( "poker-fold"
-        , 2
-        )
-    ,
-        ( "pretty"
-        , 1
-        )
-    ,
-        ( "pretty-simple"
-        , 1
-        )
-    ,
-        ( "prettychart"
-        , 1
-        )
-    ,
-        ( "prettyprinter"
-        , 1
-        )
-    ,
-        ( "primitive"
-        , 1
-        )
-    ,
-        ( "process"
-        , 1
-        )
-    ,
-        ( "process-extras"
-        , 1
-        )
-    ,
-        ( "profunctors"
-        , 6
-        )
-    ,
-        ( "random"
-        , 4
-        )
-    ,
-        ( "rdtsc"
-        , 1
-        )
-    ,
-        ( "recursion-schemes"
-        , 1
-        )
-    ,
-        ( "scotty"
-        , 1
-        )
-    ,
-        ( "semigroupoids"
-        , 2
-        )
-    ,
-        ( "stm"
-        , 1
-        )
-    ,
-        ( "streamly"
-        , 1
-        )
-    ,
-        ( "streamly-archive"
-        , 1
-        )
-    ,
-        ( "streamly-core"
-        , 1
-        )
-    ,
-        ( "string-interpolate"
-        , 6
-        )
-    ,
-        ( "tasty"
-        , 1
-        )
-    ,
-        ( "tasty-golden"
-        , 1
-        )
-    ,
-        ( "tdigest"
-        , 2
-        )
-    ,
-        ( "template-haskell"
-        , 2
-        )
-    ,
-        ( "text"
-        , 15
-        )
-    ,
-        ( "these"
-        , 2
-        )
-    ,
-        ( "time"
-        , 7
-        )
-    ,
-        ( "transformers"
-        , 1
-        )
-    ,
-        ( "tree-diff"
-        , 2
-        )
-    ,
-        ( "unordered-containers"
-        , 2
-        )
-    ,
-        ( "vector"
-        , 6
-        )
-    ,
-        ( "vector-algorithms"
-        , 2
-        )
-    ,
-        ( "vector-mmap"
-        , 1
-        )
-    ,
-        ( "wai-middleware-static"
-        , 1
-        )
-    ,
-        ( "wai-websockets"
-        , 1
-        )
-    ,
-        ( "web-rep"
-        , 5
-        )
-    ,
-        ( "websockets"
-        , 2
-        )
-    ,
-        ( "yaya"
-        , 1
-        )
-    ]
-#+end_example
-
-best dep
-
-#+begin_src haskell :results output
-, "adjunctions >=4.0 && <5"
-, "numhask-space >=0.10 && <0.12"
-, "tasty >=1.2 && <1.5"
-, "tasty-golden ^>=2.3.1.1"
-, "tdigest >=0.2.1 && <0.4"
-, "web-rep >=0.10.1 && <0.11"
-, "vector-algorithms >=0.8.0 && <0.10"
-, "vector >=0.12.3 && <0.14"
-, "tree-diff >=0.3 && <0.4"
-, "time >=1.9 && <1.13"
-, "text >=1.2 && <2.1"
-, "template-haskell >=2.16 && <2.21"
-, "string-interpolate >=0.3 && <0.4"
-, "semigroupoids >=5.3 && <6.1"
-, "rdtsc ^>=1.3"
-, "random ^>=1.2"
-, "profunctors >=5.6.2 && <5.7"
-, "pretty >=1.1.3 && <1.1.4"
-, "perf >=0.10 && <0.12"
-, "optics-core ^>=0.4"
-, "optics-extra ^>=0.4"
-, "optparse-applicative >=0.17 && <0.19"
-, "numhask >=0.10 && <0.12"
-, "mtl >=2.2.2 && <2.4"
-, "mealy >=0.4 && <0.5"
-, "lucid >=2.9 && <2.12"
-, "formatn >=0.2.1 && <0.4"
-, "flatparse >=0.3.5 && <0.6"
-, "distributive >=0.4 && <0.7"
-, "deepseq >=1.4.4 && <1.5"
-, "containers >=0.6 && <0.7"
-, "chart-svg >=0.4 && <0.5"
-, "bytestring >=0.11.3 && <0.13"
-, "box >=0.9 && <0.10"
-, "bifunctors >=5.5.11 && <5.7"
-, "base >=4.7 && <5"
-, "algebraic-graphs >=0.6 && <0.8"
-#+end_src
-
-
-#+begin_src haskell :results output
-deps = (((\xs -> [e| (Right e) <- xs]) $ parseOK depP <$> (mconcat $ snd <$> (second (mconcat . fmap fieldValues' . mconcat . fmap (whichFields (\x -> B.isPrefixOf ", " (fieldLineBS x) || B.isSuffixOf "," (fieldLineBS x)))) <$> fs))))
-#+end_src
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-pPrint $ List.sort $ List.nub $ subPreferredDeps <$> printDep <$> deps
-#+end_src
-
-#+RESULTS:
-#+begin_example
-[ "Cabal"
-, "Cabal-syntax"
-, "Color ^>=0.3"
-, "QuickCheck >=2.14 && <3"
-, "QuickCheck >=2.14.2 && <2.15"
-, "adjunctions >=4.0 && <5"
-, "algebraic-graphs >=0.6 && <0.8"
-, "async ^>=2.2"
-, "async ^>=2.2.3"
-, "async ^>=2.2.4"
-, "attoparsec >=0.13.2 && <0.15"
-, "attoparsec ^>=0.14"
-, "base >=4.7 && <5"
-, "bifunctors >=5.5.11 && <5.7"
-, "box >=0.9 && <0.10"
-, "box-socket"
-, "box-socket ^>=0.4"
-, "bytestring >=0.11.3 && <0.13"
-, "cabal-fix"
-, "chart-svg >=0.4 && <0.5"
-, "clay >=0.13 && <0.15"
-, "containers >=0.6 && <0.7"
-, "contravariant ^>=1.5"
-, "cryptonite"
-, "cubicbezier ^>=0.6"
-, "deepseq >=1.4.4 && <1.5"
-, "directory"
-, "distributive >=0.4 && <0.7"
-, "dlist ^>=1.0"
-, "dotparse"
-, "exceptions ^>=0.10"
-, "fgl"
-, "flatparse >=0.3.5 && <0.6"
-, "foldl ^>=1.4"
-, "foo"
-, "formatn >=0.2.1 && <0.4"
-, "free >=5.2 && <5.3"
-, "gauge ^>=0.2.5"
-, "iqfeed"
-, "kan-extensions ^>=5.2"
-, "language-javascript >=0.6.0 && <0.8"
-, "lucid >=2.9 && <2.12"
-, "mealy >=0.4 && <0.5"
-, "mtl >=2.2.2 && <2.4"
-, "mwc-probability ^>=2.3.1"
-, "network ^>=3.1"
-, "network-simple ^>=0.4"
-, "numhask >=0.10 && <0.12"
-, "numhask-array >=0.10 && <0.12"
-, "numhask-array >=0.10.1 && <0.12"
-, "numhask-array ^>=0.11"
-, "numhask-space >=0.10 && <0.12"
-, "optics-core ^>=0.4"
-, "optics-extra ^>=0.4"
-, "optparse-applicative >=0.17 && <0.19"
-, "optparse-generic >=1.3 && <1.5"
-, "perf >=0.10 && <0.12"
-, "poker-fold"
-, "pretty >=1.1.3 && <1.1.4"
-, "pretty-simple"
-, "prettychart"
-, "prettyprinter >=1.7.1 && <1.8"
-, "primitive >=0.7.2 && <0.9"
-, "process ^>=1.6"
-, "process-extras ^>=0.7.4"
-, "profunctors >=5.6.2 && <5.7"
-, "random ^>=1.2"
-, "rdtsc ^>=1.3"
-, "recursion-schemes ^>=5.2.2"
-, "scotty >=0.11.5 && <0.13"
-, "semigroupoids >=5.3 && <6.1"
-, "stm ^>=2.5.1"
-, "streamly >=0.8 && <0.10"
-, "streamly-archive >=0.1 && <0.3"
-, "streamly-core >=0.1 && <0.2"
-, "string-interpolate >=0.3 && <0.4"
-, "tasty >=1.2 && <1.5"
-, "tasty-golden ^>=2.3.1.1"
-, "tdigest >=0.2.1 && <0.4"
-, "template-haskell >=2.16 && <2.21"
-, "text >=1.2 && <2.1"
-, "these >=1.1 && <1.3"
-, "these >=1.1.1 && <1.3"
-, "time >=1.9 && <1.13"
-, "transformers >=0.5.6 && <0.6.2"
-, "tree-diff >=0.3 && <0.4"
-, "unordered-containers ^>=0.2"
-, "unordered-containers ^>=0.2.10"
-, "vector >=0.12.3 && <0.14"
-, "vector-algorithms >=0.8.0 && <0.10"
-, "vector-mmap >=0.0.3 && <0.1"
-, "wai-middleware-static ^>=0.9"
-, "wai-websockets ^>=3.0.1.2"
-, "web-rep >=0.10.1 && <0.11"
-, "websockets ^>=0.12"
-, "yaya >=0.4.2 && <0.5"
-]
-#+end_example
-
-* field ordering
-
-fields
-
-#+begin_src haskell :results output
-pPrint $ (fst <$> (Map.toList $ count_ $ mconcat $ mconcat $ snd <$> second (fmap fieldNames) <$> fs))
-#+end_src
-
-#+RESULTS:
-#+begin_example
-[ "author"
-, "bug-reports"
-, "build-depends"
-, "build-type"
-, "cabal-version"
-, "category"
-, "copyright"
-, "default-extensions"
-, "default-language"
-, "description"
-, "exposed-modules"
-, "extra-doc-files"
-, "ghc-options"
-, "homepage"
-, "hs-source-dirs"
-, "import"
-, "license"
-, "license-file"
-, "location"
-, "main-is"
-, "maintainer"
-, "name"
-, "other-modules"
-, "synopsis"
-, "tested-with"
-, "type"
-, "version"
-]
-#+end_example
-
-section names
-
-#+begin_src haskell :results output
-count_ $ mconcat $ fmap name <$> (filter isSection <$> snd <$> fs)
-#+end_src
-
-#+RESULTS:
-: fromList [("common",46),("executable",13),("library",20),("source-repository",20),("test-suite",1)]
-
-* tested-with
-
-#+begin_src haskell :results output
-pPrint $ second (fmap (head . value) . filter ((=="tested-with") . name)) <$> fs
-#+end_src
-
-#+RESULTS:
-#+begin_example
-[
-    ( "/Users/tonyday/haskell/numhask/numhask.cabal"
-    , [ "GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/mealy/mealy.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/box/box.cabal"
-    , [ "GHC ==8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/formatn/formatn.cabal"
-    , [ "GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.2.5 || ==9.4.4" ]
-    )
-,
-    ( "/Users/tonyday/haskell/prettychart/prettychart.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/cabal-fix/cabal-fix.cabal"
-    , [ "GHC == 9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/code/code.cabal"
-    , [ "GHC == 9.4.4" ]
-    )
-,
-    ( "/Users/tonyday/haskell/poker-fold/poker-fold.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/numhask-space/numhask-space.cabal"
-    , [ "GHC ==8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/iqfeed/iqfeed.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/box-socket/box-socket.cabal"
-    , [ "GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.2.5 || ==9.4.4" ]
-    )
-,
-    ( "/Users/tonyday/haskell/numhask-array/numhask-array.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/tonyday567/tonyday567.cabal"
-    , [ "GHC == 9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/foo/foo.cabal"
-    , []
-    )
-,
-    ( "/Users/tonyday/haskell/web-rep/web-rep.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/dotparse/dotparse.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/perf/perf.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/anal/anal.cabal"
-    , [ "GHC == 9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/research-hackage/research-hackage.cabal"
-    , [ "GHC == 8.10.7" ]
-    )
-,
-    ( "/Users/tonyday/haskell/chart-svg/chart-svg.cabal"
-    , [ "GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    )
-,
-    ( "/Users/tonyday/haskell/ephemeral/ephemeral.cabal"
-    , [ "GHC == 9.6.2" ]
-    )
-]
-#+end_example
-* individual cabal file tests
-
-#+begin_src haskell :results output
-bs <- BS.readFile "/Users/tonyday/haskell/numhask/numhask.cabal" 
-#+end_src
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-:t parseFieldsAndComments bs
-#+end_src
-
-#+RESULTS:
-: parseFieldsAndComments bs :: ([Field [ByteString]], [ByteString])
-
-** deconstruction
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-fs = toFields bs
-cs = second unComments <$> extractComments bs
-pt = Map.toList $ makePositionTree fs
-cfs = fmap (first (fmap snd)) (first (fmap ((List.!!) pt) . ((\x -> List.findIndex (\e -> fst e>x) pt))) <$> cs)
-
-#+end_src
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-:t cfs
-:t addComment
-#+end_src
-
-#+RESULTS:
-: cfs :: [(Maybe ([Int], String), [ByteString])]
-: addComment
-:   :: Maybe ([Int], String)
-:      -
-: [ByteString]
-:      -
-: ([Field [ByteString]], [ByteString])
-:      -
-: ([Field [ByteString]], [ByteString])
-
-#+begin_src haskell :results output
-fs' = foldl' (&) (fmap (fmap (const [])) fs,[]) (uncurry addComment <$> cfs)
-#+end_src
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-pPrint fs'
-#+end_src
-
-#+RESULTS:
-#+begin_example
-(
-    [ Field
-        ( Name [] "cabal-version" )
-        [ FieldLine [] "3.0" ]
-    , Field
-        ( Name [] "name" )
-        [ FieldLine [] "numhask" ]
-    , Field
-        ( Name [] "version" )
-        [ FieldLine [] "0.11.0.2" ]
-    , Field
-        ( Name [] "synopsis" )
-        [ FieldLine [] "A numeric class hierarchy." ]
-    , Field
-        ( Name [] "description" )
-        [ FieldLine [] "This package provides alternative numeric classes over Prelude."
-        , FieldLine [] "The numeric class constellation looks somewhat like:"
-        , FieldLine [] "![nh](docs/other/nh.svg)"
-        , FieldLine [] "== Usage"
-        , FieldLine [] ">>
-{-# LANGUAGE GHC2021 #-}"
-        , FieldLine [] ">>
-{-# LANGUAGE RebindableSyntax #-}"
-        , FieldLine [] ">>
-import NumHask.Prelude"
-        , FieldLine [] "See "NumHask" for a detailed overview."
-        ]
-    , Field
-        ( Name [] "category" )
-        [ FieldLine [] "mathematics" ]
-    , Field
-        ( Name [] "homepage" )
-        [ FieldLine [] "https://github.com/tonyday567/numhask#readme" ]
-    , Field
-        ( Name [] "bug-reports" )
-        [ FieldLine [] "https://github.com/tonyday567/numhask/issues" ]
-    , Field
-        ( Name [] "author" )
-        [ FieldLine [] "Tony Day" ]
-    , Field
-        ( Name [] "maintainer" )
-        [ FieldLine [] "tonyday567@gmail.com" ]
-    , Field
-        ( Name [] "copyright" )
-        [ FieldLine [] "Tony Day" ]
-    , Field
-        ( Name [] "license" )
-        [ FieldLine [] "BSD-3-Clause" ]
-    , Field
-        ( Name [] "license-file" )
-        [ FieldLine [] "LICENSE" ]
-    , Field
-        ( Name [] "build-type" )
-        [ FieldLine [] "Simple" ]
-    , Field
-        ( Name [] "tested-with" )
-        [ FieldLine [] "GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.8 || ==9.4.5 || ==9.6.2" ]
-    , Field
-        ( Name [] "extra-doc-files" )
-        [ FieldLine [] "other/*.svg,"
-        , FieldLine [] "ChangeLog.md"
-        ]
-    , Section
-        ( Name [] "source-repository" )
-        [ SecArgName [] "head" ]
-        [ Field
-            ( Name [] "type" )
-            [ FieldLine [] "git" ]
-        , Field
-            ( Name [] "location" )
-            [ FieldLine [] "https://github.com/tonyday567/numhask" ]
-        ]
-    , Section
-        ( Name [] "common" )
-        [ SecArgName [] "ghc2021-stanza" ]
-        [ Section
-            ( Name [] "if" )
-            [ SecArgName [] "impl"
-            , SecArgOther [] "("
-            , SecArgName [] "ghc"
-            , SecArgOther [] ">="
-            , SecArgName [] "9.2"
-            , SecArgOther [] ")"
-            ]
-            [ Field
-                ( Name [] "default-language" )
-                [ FieldLine [] "GHC2021" ]
-            ]
-        , Section
-            ( Name [] "if" )
-            [ SecArgName [] "impl"
-            , SecArgOther [] "("
-            , SecArgName [] "ghc"
-            , SecArgOther [] "<"
-            , SecArgName [] "9.2"
-            , SecArgOther [] ")"
-            ]
-            [ Field
-                ( Name [] "default-language" )
-                [ FieldLine [] "Haskell2010" ]
-            , Field
-                ( Name [] "default-extensions" )
-                [ FieldLine [] "BangPatterns"
-                , FieldLine [] "BinaryLiterals"
-                , FieldLine [] "ConstrainedClassMethods"
-                , FieldLine [] "ConstraintKinds"
-                , FieldLine [] "DeriveDataTypeable"
-                , FieldLine [] "DeriveFoldable"
-                , FieldLine [] "DeriveFunctor"
-                , FieldLine [] "DeriveGeneric"
-                , FieldLine [] "DeriveLift"
-                , FieldLine [] "DeriveTraversable"
-                , FieldLine [] "DoAndIfThenElse"
-                , FieldLine [] "EmptyCase"
-                , FieldLine [] "EmptyDataDecls"
-                , FieldLine [] "EmptyDataDeriving"
-                , FieldLine [] "ExistentialQuantification"
-                , FieldLine [] "ExplicitForAll"
-                , FieldLine [] "FlexibleContexts"
-                , FieldLine [] "FlexibleInstances"
-                , FieldLine [] "ForeignFunctionInterface"
-                , FieldLine [] "GADTSyntax"
-                , FieldLine [] "GeneralisedNewtypeDeriving"
-                , FieldLine [] "HexFloatLiterals"
-                , FieldLine [] "ImplicitPrelude"
-                , FieldLine [] "InstanceSigs"
-                , FieldLine [] "KindSignatures"
-                , FieldLine [] "MonomorphismRestriction"
-                , FieldLine [] "MultiParamTypeClasses"
-                , FieldLine [] "NamedFieldPuns"
-                , FieldLine [] "NamedWildCards"
-                , FieldLine [] "NumericUnderscores"
-                , FieldLine [] "PatternGuards"
-                , FieldLine [] "PolyKinds"
-                , FieldLine [] "PostfixOperators"
-                , FieldLine [] "RankNTypes"
-                , FieldLine [] "RelaxedPolyRec"
-                , FieldLine [] "ScopedTypeVariables"
-                , FieldLine [] "StandaloneDeriving"
-                , FieldLine [] "StarIsType"
-                , FieldLine [] "TraditionalRecordSyntax"
-                , FieldLine [] "TupleSections"
-                , FieldLine [] "TypeApplications"
-                , FieldLine [] "TypeOperators"
-                , FieldLine [] "TypeSynonymInstances"
-                ]
-            ]
-        , Section
-            ( Name [] "if" )
-            [ SecArgName [] "impl"
-            , SecArgOther [] "("
-            , SecArgName [] "ghc"
-            , SecArgOther [] "<"
-            , SecArgName [] "9.2"
-            , SecArgOther [] ")"
-            , SecArgOther [] "&&"
-            , SecArgName [] "impl"
-            , SecArgOther [] "("
-            , SecArgName [] "ghc"
-            , SecArgOther [] ">="
-            , SecArgName [] "8.10"
-            , SecArgOther [] ")"
-            ]
-            [ Field
-                ( Name [] "default-extensions" )
-                [ FieldLine [] "ImportQualifiedPost"
-                , FieldLine [] "StandaloneKindSignatures"
-                ]
-            ]
-        ]
-    , Section
-        ( Name [] "common" )
-        [ SecArgName [] "ghc-options-stanza" ]
-        [ Field
-            ( Name [] "ghc-options" )
-            [ FieldLine [] "-Wall"
-            , FieldLine [] "-Wcompat"
-            , FieldLine [] "-Wincomplete-record-updates"
-            , FieldLine [] "-Wincomplete-uni-patterns"
-            , FieldLine [] "-Wredundant-constraints"
-            , FieldLine [] "-Widentities"
-            , FieldLine [] "-Wpartial-fields"
-            ]
-        , Section
-            ( Name [] "if" )
-            [ SecArgName [] "impl"
-            , SecArgOther [] "("
-            , SecArgName [] "ghc"
-            , SecArgOther [] ">="
-            , SecArgName [] "8.8"
-            , SecArgOther [] ")"
-            ]
-            [ Field
-                ( Name [] "ghc-options" )
-                [ FieldLine [] "-fwrite-ide-info"
-                , FieldLine [] "-hiedir=.hie"
-                ]
-            ]
-        ]
-    , Section
-        ( Name [] "library" ) []
-        [ Field
-            ( Name [] "import" )
-            [ FieldLine [] "ghc2021-stanza" ]
-        , Field
-            ( Name [] "import" )
-            [ FieldLine [] "ghc-options-stanza" ]
-        , Field
-            ( Name [] "hs-source-dirs" )
-            [ FieldLine [] "src" ]
-        , Field
-            ( Name [] "default-extensions" )
-            [ FieldLine [] "RebindableSyntax" ]
-        , Section
-            ( Name [ "-- keeping ormolu happy" ] "if" )
-            [ SecArgName [] "impl"
-            , SecArgOther [] "("
-            , SecArgName [] "ghc"
-            , SecArgOther [] ">="
-            , SecArgName [] "8.10"
-            , SecArgOther [] ")"
-            ]
-            [ Field
-                ( Name [] "default-extensions" )
-                [ FieldLine [] "NoImportQualifiedPost" ]
-            ]
-        , Field
-            ( Name [] "build-depends" )
-            [ FieldLine [] "base >=4.7 && <5,"
-            , FieldLine [ "-- keeping cabal-docspec happy" ] "QuickCheck >=2.14 && <3"
-            ]
-        , Field
-            ( Name [] "exposed-modules" )
-            [ FieldLine [] "NumHask"
-            , FieldLine [] "NumHask.Algebra.Additive"
-            , FieldLine [] "NumHask.Algebra.Field"
-            , FieldLine [] "NumHask.Algebra.Group"
-            , FieldLine [] "NumHask.Algebra.Lattice"
-            , FieldLine [] "NumHask.Algebra.Metric"
-            , FieldLine [] "NumHask.Algebra.Action"
-            , FieldLine [] "NumHask.Algebra.Multiplicative"
-            , FieldLine [] "NumHask.Algebra.Ring"
-            , FieldLine [] "NumHask.Data.Complex"
-            , FieldLine [] "NumHask.Data.Integral"
-            , FieldLine [] "NumHask.Data.Rational"
-            , FieldLine [] "NumHask.Exception"
-            , FieldLine [] "NumHask.Prelude"
-            ]
-        , Field
-            ( Name [] "other-modules" ) []
-        ]
-    ]
-, []
-)
-#+end_example
-
-
-#+begin_src haskell :results output
-:t fmap (fmap (const [])) fs
-#+end_src
-
-#+RESULTS:
-: fmap (fmap (const [])) fs :: [Field [a]]
-
-#+begin_src haskell :results output
-pt = makePositionTree fieldsFoo
-#+end_src
-
-#+begin_src haskell :results output
-:t Map.toList $ pt
-#+end_src
-
-#+RESULTS:
-: Map.toList $ pt :: [(Int, ([Int], String))]
-
-#+begin_src haskell :results output
-(\x -> List.findIndex (\e -> fst e>x) (Map.toList pt)) 115 
-#+end_src
-
-#+RESULTS:
-: Just 103
-
-#+begin_src haskell :results output
-(List.!!) (Map.toList pt) <$> ((\x -> List.findIndex (\e -> fst e>x) (Map.toList pt)) 121) 
-
-#+end_src
-
-#+RESULTS:
-: Just (122,([19,5,1],"fieldline"))
-
-#+begin_src haskell :results output
-extractComments contentsFoo
-#+end_src
-
-#+RESULTS:
-: [(115,Comments ["-- keeping ormolu happy"]),(121,Comments ["-- keeping cabal-docspec happy"])]
-
-
-
-
-#+begin_src haskell :results output
-fieldUniverseN fieldsFoo
-#+end_src
-
-#+begin_src haskell :results output
-comments'' (extractComments contentsFoo) (fieldUniverseN fieldsFoo)
-#+end_src
-
-#+RESULTS:
-: fromList [(Nth 19 (Nth 4 End),Comments ["-- keeping ormolu happy"]),(Nth 19 (Nth 6 End),Comments ["-- keeping cabal-docspec happy"])]
-
-
-#+begin_src haskell :results output
-seci (fieldsFoo List.!! 19) 5
-#+end_src
-
-#+RESULTS:
-: Just (Field (Name (Position 119 3) "build-depends") [FieldLine (Position 120 5) "base >=4.7 && <5,",FieldLine (Position 122 5) "QuickCheck >=2.14 && <3"])
-
-
-#+begin_src haskell :results output
-attachComments contentsFoo fsFoo
-#+end_src
-
-#+RESULTS:
-: ([Field (Name (Comments []) "cabal-version") [FieldLine (Comments []) "3.0"],Field (Name (Comments []) "name") [FieldLine (Comments []) "numhask"],Field (Name (Comments []) "version") [FieldLine (Comments []) "0.11.0.2"],Field (Name (Comments []) "synopsis") [FieldLine (Comments []) "A numeric class hierarchy."],Field (Name (Comments []) "description") [FieldLine (Comments []) "This package provides alternative numeric classes over Prelude.",FieldLine (Comments []) "The numeric class constellation looks somewhat like:",FieldLine (Comments []) "![nh](docs/other/nh.svg)",FieldLine (Comments []) "== Usage",FieldLine (Comments []) ">>
-: {-# LANGUAGE GHC2021 #-}",FieldLine (Comments []) ">>
-: {-# LANGUAGE RebindableSyntax #-}",FieldLine (Comments []) ">>
-: import NumHask.Prelude",FieldLine (Comments []) "See \"NumHask\" for a detailed overview."],Field (Name (Comments []) "category") [FieldLine (Comments []) "mathematics"],Field (Name (Comments []) "homepage") [FieldLine (Comments []) "https://github.com/tonyday567/numhask#readme"],Field (Name (Comments []) "bug-reports") [FieldLine (Comments []) "https://github.com/tonyday567/numhask/issues"],Field (Name (Comments []) "author") [FieldLine (Comments []) "Tony Day"],Field (Name (Comments []) "maintainer") [FieldLine (Comments []) "tonyday567@gmail.com"],Field (Name (Comments []) "copyright") [FieldLine (Comments []) "Tony Day"],Field (Name (Comments []) "license") [FieldLine (Comments []) "BSD-3-Clause"],Field (Name (Comments []) "license-file") [FieldLine (Comments []) "LICENSE"],Field (Name (Comments []) "build-type") [FieldLine (Comments []) "Simple"],Field (Name (Comments []) "tested-with") [FieldLine (Comments []) "GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.8 || ==9.4.5 || ==9.6.2"],Field (Name (Comments []) "extra-doc-files") [FieldLine (Comments []) "other/*.svg,",FieldLine (Comments []) "ChangeLog.md"],Section (Name (Comments []) "source-repository") [SecArgName (Comments []) "head"] [Field (Name (Comments []) "type") [FieldLine (Comments []) "git"],Field (Name (Comments []) "location") [FieldLine (Comments []) "https://github.com/tonyday567/numhask"]],Section (Name (Comments []) "common") [SecArgName (Comments []) "ghc2021-stanza"] [Section (Name (Comments []) "if") [SecArgName (Comments []) "impl",SecArgOther (Comments []) "(",SecArgName (Comments []) "ghc",SecArgOther (Comments []) ">=",SecArgName (Comments []) "9.2",SecArgOther (Comments []) ")"] [Field (Name (Comments []) "default-language") [FieldLine (Comments []) "GHC2021"]],Section (Name (Comments []) "if") [SecArgName (Comments []) "impl",SecArgOther (Comments []) "(",SecArgName (Comments []) "ghc",SecArgOther (Comments []) "<",SecArgName (Comments []) "9.2",SecArgOther (Comments []) ")"] [Field (Name (Comments []) "default-language") [FieldLine (Comments []) "Haskell2010"],Field (Name (Comments []) "default-extensions") [FieldLine (Comments []) "BangPatterns",FieldLine (Comments []) "BinaryLiterals",FieldLine (Comments []) "ConstrainedClassMethods",FieldLine (Comments []) "ConstraintKinds",FieldLine (Comments []) "DeriveDataTypeable",FieldLine (Comments []) "DeriveFoldable",FieldLine (Comments []) "DeriveFunctor",FieldLine (Comments []) "DeriveGeneric",FieldLine (Comments []) "DeriveLift",FieldLine (Comments []) "DeriveTraversable",FieldLine (Comments []) "DoAndIfThenElse",FieldLine (Comments []) "EmptyCase",FieldLine (Comments []) "EmptyDataDecls",FieldLine (Comments []) "EmptyDataDeriving",FieldLine (Comments []) "ExistentialQuantification",FieldLine (Comments []) "ExplicitForAll",FieldLine (Comments []) "FlexibleContexts",FieldLine (Comments []) "FlexibleInstances",FieldLine (Comments []) "ForeignFunctionInterface",FieldLine (Comments []) "GADTSyntax",FieldLine (Comments []) "GeneralisedNewtypeDeriving",FieldLine (Comments []) "HexFloatLiterals",FieldLine (Comments []) "ImplicitPrelude",FieldLine (Comments []) "InstanceSigs",FieldLine (Comments []) "KindSignatures",FieldLine (Comments []) "MonomorphismRestriction",FieldLine (Comments []) "MultiParamTypeClasses",FieldLine (Comments []) "NamedFieldPuns",FieldLine (Comments []) "NamedWildCards",FieldLine (Comments []) "NumericUnderscores",FieldLine (Comments []) "PatternGuards",FieldLine (Comments []) "PolyKinds",FieldLine (Comments []) "PostfixOperators",FieldLine (Comments []) "RankNTypes",FieldLine (Comments []) "RelaxedPolyRec",FieldLine (Comments []) "ScopedTypeVariables",FieldLine (Comments []) "StandaloneDeriving",FieldLine (Comments []) "StarIsType",FieldLine (Comments []) "TraditionalRecordSyntax",FieldLine (Comments []) "TupleSections",FieldLine (Comments []) "TypeApplications",FieldLine (Comments []) "TypeOperators",FieldLine (Comments []) "TypeSynonymInstances"]],Section (Name (Comments []) "if") [SecArgName (Comments []) "impl",SecArgOther (Comments []) "(",SecArgName (Comments []) "ghc",SecArgOther (Comments []) "<",SecArgName (Comments []) "9.2",SecArgOther (Comments []) ")",SecArgOther (Comments []) "&&",SecArgName (Comments []) "impl",SecArgOther (Comments []) "(",SecArgName (Comments []) "ghc",SecArgOther (Comments []) ">=",SecArgName (Comments []) "8.10",SecArgOther (Comments []) ")"] [Field (Name (Comments []) "default-extensions") [FieldLine (Comments []) "ImportQualifiedPost",FieldLine (Comments []) "StandaloneKindSignatures"]]],Section (Name (Comments []) "common") [SecArgName (Comments []) "ghc-options-stanza"] [Field (Name (Comments []) "ghc-options") [FieldLine (Comments []) "-Wall",FieldLine (Comments []) "-Wcompat",FieldLine (Comments []) "-Wincomplete-record-updates",FieldLine (Comments []) "-Wincomplete-uni-patterns",FieldLine (Comments []) "-Wredundant-constraints",FieldLine (Comments []) "-Widentities",FieldLine (Comments []) "-Wpartial-fields"],Section (Name (Comments []) "if") [SecArgName (Comments []) "impl",SecArgOther (Comments []) "(",SecArgName (Comments []) "ghc",SecArgOther (Comments []) ">=",SecArgName (Comments []) "8.8",SecArgOther (Comments []) ")"] [Field (Name (Comments []) "ghc-options") [FieldLine (Comments []) "-fwrite-ide-info",FieldLine (Comments []) "-hiedir=.hie"]]],Section (Name (Comments []) "library") [] [Field (Name (Comments []) "import") [FieldLine (Comments []) "ghc2021-stanza"],Field (Name (Comments []) "import") [FieldLine (Comments []) "ghc-options-stanza"],Field (Name (Comments []) "hs-source-dirs") [FieldLine (Comments []) "src"],Field (Name (Comments []) "default-extensions") [FieldLine (Comments []) "RebindableSyntax"],Section (Name (Comments ["-- keeping ormolu happy"]) "if") [SecArgName (Comments ["-- keeping ormolu happy"]) "impl",SecArgOther (Comments ["-- keeping ormolu happy"]) "(",SecArgName (Comments ["-- keeping ormolu happy"]) "ghc",SecArgOther (Comments ["-- keeping ormolu happy"]) ">=",SecArgName (Comments ["-- keeping ormolu happy"]) "8.10",SecArgOther (Comments ["-- keeping ormolu happy"]) ")"] [Field (Name (Comments []) "default-extensions") [FieldLine (Comments []) "NoImportQualifiedPost"]],Field (Name (Comments []) "build-depends") [FieldLine (Comments []) "base >=4.7 && <5,",FieldLine (Comments []) "QuickCheck >=2.14 && <3"],Field (Name (Comments ["-- keeping cabal-docspec happy"]) "exposed-modules") [FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Additive",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Field",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Group",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Lattice",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Metric",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Action",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Multiplicative",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Algebra.Ring",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Data.Complex",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Data.Integral",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Data.Rational",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Exception",FieldLine (Comments ["-- keeping cabal-docspec happy"]) "NumHask.Prelude"],Field (Name (Comments []) "other-modules") []]],Comments [])
-
-#+begin_src haskell :results output
-writeCabalFile("/Users/tonyday/haskell/numhask/numhask2.cabal") fsFoo
-#+end_src
-
-#+RESULTS:
-
-#+begin_src haskell :results output
-pPrint $ renderCabal $ sortFieldLines <$> sortFields fsFoo
-#+end_src
-
-#+RESULTS:
-#+begin_example
-"cabal-version: 3.0
-name:
-  numhask
-version:
-  0.11.0.2
-license:
-  BSD-3-Clause
-license-file:
-  LICENSE
-author:
-  Tony Day
-maintainer:
-  tonyday567@gmail.com
-homepage:
-  https://github.com/tonyday567/numhask#readme
-bug-reports:
-  https://github.com/tonyday567/numhask/issues
-synopsis:
-  A numeric class hierarchy.
-description:
-  This package provides alternative numeric classes over Prelude.
-
-  The numeric class constellation looks somewhat like:
-
-  ![nh](docs/other/nh.svg)
-
-  == Usage
-
-  >>
-{-# LANGUAGE GHC2021 #-}
-  >>
-{-# LANGUAGE RebindableSyntax #-}
-  >>
-import NumHask.Prelude
-
-  See "NumHask" for a detailed overview.
-build-type:
-  Simple
-tested-with:
-  GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.8 || ==9.4.5 || ==9.6.2
-extra-doc-files:
-  ChangeLog.md
-  other/*.svg,
-
-source-repository head
-  type:
-    git
-  location:
-    https://github.com/tonyday567/numhask
-
-common ghc-options-stanza
-  ghc-options:
-    -Wall
-    -Wcompat
-    -Widentities
-    -Wincomplete-record-updates
-    -Wincomplete-uni-patterns
-    -Wpartial-fields
-    -Wredundant-constraints
-
-  if impl ( ghc >= 8.8 )
-    ghc-options:
-      -fwrite-ide-info
-      -hiedir=.hie
-
-common ghc2021-stanza
-  if impl ( ghc >= 9.2 )
-    default-language:
-      GHC2021
-
-  if impl ( ghc < 9.2 )
-    default-language:
-      Haskell2010
-    default-extensions:
-      BangPatterns
-      BinaryLiterals
-      ConstrainedClassMethods
-      ConstraintKinds
-      DeriveDataTypeable
-      DeriveFoldable
-      DeriveFunctor
-      DeriveGeneric
-      DeriveLift
-      DeriveTraversable
-      DoAndIfThenElse
-      EmptyCase
-      EmptyDataDecls
-      EmptyDataDeriving
-      ExistentialQuantification
-      ExplicitForAll
-      FlexibleContexts
-      FlexibleInstances
-      ForeignFunctionInterface
-      GADTSyntax
-      GeneralisedNewtypeDeriving
-      HexFloatLiterals
-      ImplicitPrelude
-      InstanceSigs
-      KindSignatures
-      MonomorphismRestriction
-      MultiParamTypeClasses
-      NamedFieldPuns
-      NamedWildCards
-      NumericUnderscores
-      PatternGuards
-      PolyKinds
-      PostfixOperators
-      RankNTypes
-      RelaxedPolyRec
-      ScopedTypeVariables
-      StandaloneDeriving
-      StarIsType
-      TraditionalRecordSyntax
-      TupleSections
-      TypeApplications
-      TypeOperators
-      TypeSynonymInstances
-
-  if impl ( ghc < 9.2 ) && impl ( ghc >= 8.10 )
-    default-extensions:
-      ImportQualifiedPost
-      StandaloneKindSignatures
-
-library
-  import:
-    ghc-options-stanza
-  import:
-    ghc2021-stanza
-  hs-source-dirs:
-    src
-  build-depends:
-    QuickCheck >=2.14 && <3
-    base >=4.7 && <5,
-  exposed-modules:
-    NumHask
-    NumHask.Algebra.Action
-    NumHask.Algebra.Additive
-    NumHask.Algebra.Field
-    NumHask.Algebra.Group
-    NumHask.Algebra.Lattice
-    NumHask.Algebra.Metric
-    NumHask.Algebra.Multiplicative
-    NumHask.Algebra.Ring
-    NumHask.Data.Complex
-    NumHask.Data.Integral
-    NumHask.Data.Rational
-    NumHask.Exception
-    NumHask.Prelude
-  other-modules:
-  default-extensions:
-    RebindableSyntax
-
-  if impl ( ghc >= 8.10 )
-    default-extensions:
-      NoImportQualifiedPost
-
-copyright:
-  Tony Day
-category:
-  mathematics
-"
-#+end_example
-

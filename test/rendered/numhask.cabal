@@ -1,40 +1,55 @@
 cabal-version: 3.0
-name: cabal-fix
-version: 0.0.0.1
+name: numhask
+version: 0.11.0.2
 license: BSD-3-Clause
 license-file: LICENSE
-category: distribution
+copyright: Tony Day (c) 2016
+category: math
 author: Tony Day
 maintainer: tonyday567@gmail.com
-homepage: https://github.com/tonyday567/cabal-fixes#readme
-bug-reports: https://github.com/tonyday567/cabal-fixes/issues
-synopsis: See readme
-description: See readme for description.
+homepage: https://github.com/tonyday567/numhask#readme
+bug-reports: https://github.com/tonyday567/numhask/issues
+synopsis: A numeric class hierarchy.
+description:
+    This package provides alternative numeric classes over Prelude.
+
+    The numeric class constellation looks somewhat like:
+
+    ![nh](docs/other/nh.svg)
+
+    == Usage
+
+    >>> {-# LANGUAGE GHC2021 #-}
+    >>> {-# LANGUAGE RebindableSyntax #-}
+    >>> import NumHask.Prelude
+
+    See "NumHask" for a detailed overview.
+
 build-type: Simple
-tested-with: GHC == 9.6.2
+tested-with:
+    GHC ==8.6.5 || ==8.8.4 || ==8.10.7 || ==9.0.2 || ==9.2.8 || ==9.4.5 || ==9.6.2
 extra-doc-files:
     ChangeLog.md
-    readme.org
+    other/*.svg
 
 source-repository head
     type: git
-    location: https://github.com/tonyday567/cabal-fixes
-
-common ghc-options-exe-stanza
-    ghc-options:
-        -fforce-recomp
-        -funbox-strict-fields
-        -rtsopts
-        -threaded
-        -with-rtsopts=-N
+    location: https://github.com/tonyday567/numhask
 
 common ghc-options-stanza
     ghc-options:
         -Wall
         -Wcompat
+        -Widentities
         -Wincomplete-record-updates
         -Wincomplete-uni-patterns
+        -Wpartial-fields
         -Wredundant-constraints
+
+    if impl ( ghc >= 8.8 )
+        ghc-options:
+            -fwrite-ide-info
+            -hiedir=.hie
 
 common ghc2021-stanza
     if impl ( ghc >= 9.2 )
@@ -97,26 +112,27 @@ library
     import: ghc2021-stanza
     hs-source-dirs: src
     build-depends:
-        , Cabal-syntax
-        , base               >=4.7 && <5
-        , box                >=0.9 && <0.10
-        , bytestring         >=0.11.3 && <0.13
-        , containers         >=0.6 && <0.7
-        , directory
-        , flatparse          >=0.3.5 && <0.6
-        , pretty             >=1.1.3 && <1.1.4
-        , pretty-simple
-        , string-interpolate >=0.3 && <0.4
-    exposed-modules: Cabal.Fix
-    default-extensions:
+        -- keeping cabal-docspec happy
+        , QuickCheck >=2.14 && <3
+        , base       >=4.7 && <5
+    exposed-modules:
+        NumHask
+        NumHask.Algebra.Action
+        NumHask.Algebra.Additive
+        NumHask.Algebra.Field
+        NumHask.Algebra.Group
+        NumHask.Algebra.Lattice
+        NumHask.Algebra.Metric
+        NumHask.Algebra.Multiplicative
+        NumHask.Algebra.Ring
+        NumHask.Data.Complex
+        NumHask.Data.Integral
+        NumHask.Data.Rational
+        NumHask.Exception
+        NumHask.Prelude
+    other-modules:
+    default-extensions: RebindableSyntax
 
-executable cabal-fixes
-    import: ghc-options-exe-stanza
-    import: ghc-options-stanza
-    import: ghc2021-stanza
-    main-is: cabal-fixes.hs
-    hs-source-dirs: app
-    build-depends:
-        , base                 >=4.7 && <5
-        , cabal-fix
-        , optparse-applicative >=0.17 && <0.19
+    -- keeping ormolu happy
+    if impl ( ghc >= 8.10 )
+        default-extensions: NoImportQualifiedPost

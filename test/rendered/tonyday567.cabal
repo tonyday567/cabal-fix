@@ -1,24 +1,22 @@
 cabal-version: 3.0
-name: cabal-fix
-version: 0.0.0.1
+name: tonyday567
+version: 0.0.1
 license: BSD-3-Clause
 license-file: LICENSE
-category: distribution
+copyright: Tony Day (c) 2020
+category: web
 author: Tony Day
 maintainer: tonyday567@gmail.com
-homepage: https://github.com/tonyday567/cabal-fixes#readme
-bug-reports: https://github.com/tonyday567/cabal-fixes/issues
-synopsis: See readme
-description: See readme for description.
+homepage: https://github.com/tonyday567/tonyday567#readme
+bug-reports: https://github.com/tonyday567/tonyday567/issues
+synopsis: See readme.md
+description: See readme.md for description.
 build-type: Simple
 tested-with: GHC == 9.6.2
-extra-doc-files:
-    ChangeLog.md
-    readme.org
 
 source-repository head
     type: git
-    location: https://github.com/tonyday567/cabal-fixes
+    location: https://github.com/tonyday567/tonyday567
 
 common ghc-options-exe-stanza
     ghc-options:
@@ -32,8 +30,10 @@ common ghc-options-stanza
     ghc-options:
         -Wall
         -Wcompat
+        -Widentities
         -Wincomplete-record-updates
         -Wincomplete-uni-patterns
+        -Wpartial-fields
         -Wredundant-constraints
 
 common ghc2021-stanza
@@ -92,31 +92,13 @@ common ghc2021-stanza
             ImportQualifiedPost
             StandaloneKindSignatures
 
-library
-    import: ghc-options-stanza
-    import: ghc2021-stanza
-    hs-source-dirs: src
-    build-depends:
-        , Cabal-syntax
-        , base               >=4.7 && <5
-        , box                >=0.9 && <0.10
-        , bytestring         >=0.11.3 && <0.13
-        , containers         >=0.6 && <0.7
-        , directory
-        , flatparse          >=0.3.5 && <0.6
-        , pretty             >=1.1.3 && <1.1.4
-        , pretty-simple
-        , string-interpolate >=0.3 && <0.4
-    exposed-modules: Cabal.Fix
-    default-extensions:
-
-executable cabal-fixes
+executable tonyday567
     import: ghc-options-exe-stanza
     import: ghc-options-stanza
     import: ghc2021-stanza
-    main-is: cabal-fixes.hs
+    main-is: app.hs
     hs-source-dirs: app
     build-depends:
-        , base                 >=4.7 && <5
-        , cabal-fix
-        , optparse-applicative >=0.17 && <0.19
+    build-depends:
+        , base               >=4.7 && <5
+        , string-interpolate >=0.3 && <0.4

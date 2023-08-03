@@ -1,0 +1,99 @@
+cabal-version: 3.0
+name: ephemeral
+version: 0.0.1
+synopsis: See readme.md
+description: See readme.md for description.
+category: project
+author: Tony Day
+maintainer: tonyday567@gmail.com
+copyright: Tony Day (c) AfterTimes
+license: BSD-3-Clause
+homepage: https://github.com/tonyday567/ephemeral#readme
+tested-with: GHC == 9.6.2
+bug-reports: https://github.com/tonyday567/ephemeral/issues
+build-type: Simple
+source-repository head
+  type: git
+  location: https://github.com/tonyday567/ephemeral
+
+common ghc2021-stanza
+  if impl(ghc >=9.2)
+    default-language:
+      GHC2021
+  if impl(ghc <9.2)
+    default-language:
+      Haskell2010
+    default-extensions:
+      BangPatterns
+      BinaryLiterals
+      ConstrainedClassMethods
+      ConstraintKinds
+      DeriveDataTypeable
+      DeriveFoldable
+      DeriveFunctor
+      DeriveGeneric
+      DeriveLift
+      DeriveTraversable
+      DoAndIfThenElse
+      EmptyCase
+      EmptyDataDecls
+      EmptyDataDeriving
+      ExistentialQuantification
+      ExplicitForAll
+      FlexibleContexts
+      FlexibleInstances
+      ForeignFunctionInterface
+      GADTSyntax
+      GeneralisedNewtypeDeriving
+      HexFloatLiterals
+      ImplicitPrelude
+      InstanceSigs
+      KindSignatures
+      MonomorphismRestriction
+      MultiParamTypeClasses
+      NamedFieldPuns
+      NamedWildCards
+      NumericUnderscores
+      PatternGuards
+      PolyKinds
+      PostfixOperators
+      RankNTypes
+      RelaxedPolyRec
+      ScopedTypeVariables
+      StandaloneDeriving
+      StarIsType
+      TraditionalRecordSyntax
+      TupleSections
+      TypeApplications
+      TypeOperators
+      TypeSynonymInstances
+  if impl(ghc <9.2) && impl(ghc >=8.10)
+    default-extensions:
+      ImportQualifiedPost
+      StandaloneKindSignatures
+
+common ghc-options-stanza
+  ghc-options:
+    -Wall
+    -Wcompat
+    -Wincomplete-record-updates
+    -Wincomplete-uni-patterns
+    -Wredundant-constraints
+    -Widentities
+    -Wpartial-fields
+
+library
+  import: ghc2021-stanza
+  import: ghc-options-stanza
+  exposed-modules:
+    Ephemeral.Search
+    Ephemeral.Shekel
+    Ephemeral.Hughes
+  hs-source-dirs:
+    src
+  build-depends:
+    base >= 4.7 && < 5,
+    free >= 5.2 && < 5.3,
+    profunctors >= 5.6.2 && < 5.7,
+    numhask >= 0.11.0 && < 0.12,
+    yaya >= 0.4.2 && < 0.5,

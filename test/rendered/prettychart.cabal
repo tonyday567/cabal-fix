@@ -1,39 +1,36 @@
 cabal-version: 3.0
-name: cabal-fix
-version: 0.0.0.1
+name: prettychart
+version: 0.1.1.0
 license: BSD-3-Clause
 license-file: LICENSE
-category: distribution
+copyright: Tony Day (c) 2023
+category: graphcs
 author: Tony Day
 maintainer: tonyday567@gmail.com
-homepage: https://github.com/tonyday567/cabal-fixes#readme
-bug-reports: https://github.com/tonyday567/cabal-fixes/issues
-synopsis: See readme
-description: See readme for description.
+homepage: https://github.com/tonyday567/prettychart#readme
+bug-reports: https://github.com/tonyday567/prettychart/issues
+synopsis: Pretty print charts from ghci.
+description:
+    Serve and print charts from ghci, with automatic formatting.
 build-type: Simple
-tested-with: GHC == 9.6.2
+tested-with: GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2
 extra-doc-files:
     ChangeLog.md
+    other/*.svg
     readme.org
 
 source-repository head
     type: git
-    location: https://github.com/tonyday567/cabal-fixes
-
-common ghc-options-exe-stanza
-    ghc-options:
-        -fforce-recomp
-        -funbox-strict-fields
-        -rtsopts
-        -threaded
-        -with-rtsopts=-N
+    location: https://github.com/tonyday567/prettychart
 
 common ghc-options-stanza
     ghc-options:
         -Wall
         -Wcompat
+        -Widentities
         -Wincomplete-record-updates
         -Wincomplete-uni-patterns
+        -Wpartial-fields
         -Wredundant-constraints
 
 common ghc2021-stanza
@@ -97,26 +94,25 @@ library
     import: ghc2021-stanza
     hs-source-dirs: src
     build-depends:
-        , Cabal-syntax
-        , base               >=4.7 && <5
-        , box                >=0.9 && <0.10
-        , bytestring         >=0.11.3 && <0.13
-        , containers         >=0.6 && <0.7
-        , directory
-        , flatparse          >=0.3.5 && <0.6
-        , pretty             >=1.1.3 && <1.1.4
-        , pretty-simple
-        , string-interpolate >=0.3 && <0.4
-    exposed-modules: Cabal.Fix
-    default-extensions:
-
-executable cabal-fixes
-    import: ghc-options-exe-stanza
-    import: ghc-options-stanza
-    import: ghc2021-stanza
-    main-is: cabal-fixes.hs
-    hs-source-dirs: app
-    build-depends:
-        , base                 >=4.7 && <5
-        , cabal-fix
-        , optparse-applicative >=0.17 && <0.19
+        , async         ^>=2.2.4
+        , base          >=4.7 && <5
+        , box           >=0.9 && <0.10
+        , bytestring    >=0.11.3 && <0.13
+        , chart-svg     >=0.4 && <0.5
+        , containers    >=0.6 && <0.7
+        , flatparse     >=0.3.5 && <0.6
+        , formatn       >=0.2.1 && <0.4
+        , lucid         >=2.9 && <2.12
+        , mealy         >=0.4 && <0.5
+        , numhask-space >=0.10 && <0.12
+        , optics-core   >=0.4 && <0.5
+        , profunctors   >=5.6.2 && <5.7
+        , text          >=1.2 && <2.1
+        , time          >=1.9 && <1.13
+        , web-rep       >=0.10.1 && <0.11
+    exposed-modules:
+        Prettychart
+        Prettychart.Any
+        Prettychart.Charts
+        Prettychart.ExampleData
+        Prettychart.Server

@@ -1,39 +1,46 @@
 cabal-version: 3.0
-name: cabal-fix
-version: 0.0.0.1
+name: numhask-array
+version: 0.11.0.1
 license: BSD-3-Clause
 license-file: LICENSE
-category: distribution
+copyright: Tony Day (c) 2016
+category: math
 author: Tony Day
 maintainer: tonyday567@gmail.com
-homepage: https://github.com/tonyday567/cabal-fixes#readme
-bug-reports: https://github.com/tonyday567/cabal-fixes/issues
-synopsis: See readme
-description: See readme for description.
+homepage: https://github.com/tonyday567/numhask-array#readme
+bug-reports: https://github.com/tonyday567/numhask-array/issues
+synopsis: Multi-dimensional arrays.
+description:
+    This package provides an interface into the [numhask](https://hackage.haskell.org/package/numhask) API, and both type- and value-level shape manipulation routines.
+
+    == Usage
+
+    >>> {-# LANGUAGE RebindableSyntax #-}
+    >>> import NumHask.Prelude
+    >>> import NumHask.Array
+
+    In situations where shape is only known at runtime, a clear module configuration is:
+
+    >>> import NumHask.Array.Shape
+    >>> import qualified NumHask.Array.Fixed as F
+    >>> import qualified NumHask.Array.Dynamic as D
+
 build-type: Simple
-tested-with: GHC == 9.6.2
-extra-doc-files:
-    ChangeLog.md
-    readme.org
+tested-with: GHC == 8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2
+extra-doc-files: ChangeLog.md
 
 source-repository head
     type: git
-    location: https://github.com/tonyday567/cabal-fixes
-
-common ghc-options-exe-stanza
-    ghc-options:
-        -fforce-recomp
-        -funbox-strict-fields
-        -rtsopts
-        -threaded
-        -with-rtsopts=-N
+    location: https://github.com/tonyday567/numhask-array
 
 common ghc-options-stanza
     ghc-options:
         -Wall
         -Wcompat
+        -Widentities
         -Wincomplete-record-updates
         -Wincomplete-uni-patterns
+        -Wpartial-fields
         -Wredundant-constraints
 
 common ghc2021-stanza
@@ -97,26 +104,13 @@ library
     import: ghc2021-stanza
     hs-source-dirs: src
     build-depends:
-        , Cabal-syntax
-        , base               >=4.7 && <5
-        , box                >=0.9 && <0.10
-        , bytestring         >=0.11.3 && <0.13
-        , containers         >=0.6 && <0.7
-        , directory
-        , flatparse          >=0.3.5 && <0.6
-        , pretty             >=1.1.3 && <1.1.4
-        , pretty-simple
-        , string-interpolate >=0.3 && <0.4
-    exposed-modules: Cabal.Fix
-    default-extensions:
-
-executable cabal-fixes
-    import: ghc-options-exe-stanza
-    import: ghc-options-stanza
-    import: ghc2021-stanza
-    main-is: cabal-fixes.hs
-    hs-source-dirs: app
-    build-depends:
-        , base                 >=4.7 && <5
-        , cabal-fix
-        , optparse-applicative >=0.17 && <0.19
+        , adjunctions  >=4.0 && <5
+        , base         >=4.7 && <5
+        , distributive >=0.4 && <0.7
+        , numhask      >=0.10 && <0.12
+        , vector       >=0.12.3 && <0.14
+    exposed-modules:
+        NumHask.Array
+        NumHask.Array.Dynamic
+        NumHask.Array.Fixed
+        NumHask.Array.Shape

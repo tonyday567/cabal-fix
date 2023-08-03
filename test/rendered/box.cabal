@@ -1,32 +1,23 @@
-cabal-version: 3.0
-name: cabal-fix
-version: 0.0.0.1
+cabal-version: 2.4
+name: box
+version: 0.9.2.0
 license: BSD-3-Clause
 license-file: LICENSE
-category: distribution
+copyright: Tony Day (c) 2017
+category: control
 author: Tony Day
 maintainer: tonyday567@gmail.com
-homepage: https://github.com/tonyday567/cabal-fixes#readme
-bug-reports: https://github.com/tonyday567/cabal-fixes/issues
-synopsis: See readme
-description: See readme for description.
+homepage: https://github.com/tonyday567/box#readme
+bug-reports: https://github.com/tonyday567/box/issues
+synopsis: A profunctor effect system.
+description:
+    This might be a profunctor effect system, but unlike all the others. See the project readme.org for usage and discussion: https://github.com/tonyday567/box#readme.org
 build-type: Simple
-tested-with: GHC == 9.6.2
-extra-doc-files:
-    ChangeLog.md
-    readme.org
+tested-with: GHC ==8.10.7 || ==9.2.8 || ==9.4.5 || ==9.6.2
 
 source-repository head
     type: git
-    location: https://github.com/tonyday567/cabal-fixes
-
-common ghc-options-exe-stanza
-    ghc-options:
-        -fforce-recomp
-        -funbox-strict-fields
-        -rtsopts
-        -threaded
-        -with-rtsopts=-N
+    location: https://github.com/tonyday567/box
 
 common ghc-options-stanza
     ghc-options:
@@ -97,26 +88,28 @@ library
     import: ghc2021-stanza
     hs-source-dirs: src
     build-depends:
-        , Cabal-syntax
-        , base               >=4.7 && <5
-        , box                >=0.9 && <0.10
-        , bytestring         >=0.11.3 && <0.13
-        , containers         >=0.6 && <0.7
-        , directory
-        , flatparse          >=0.3.5 && <0.6
-        , pretty             >=1.1.3 && <1.1.4
-        , pretty-simple
-        , string-interpolate >=0.3 && <0.4
-    exposed-modules: Cabal.Fix
-    default-extensions:
-
-executable cabal-fixes
-    import: ghc-options-exe-stanza
-    import: ghc-options-stanza
-    import: ghc2021-stanza
-    main-is: cabal-fixes.hs
-    hs-source-dirs: app
-    build-depends:
-        , base                 >=4.7 && <5
-        , cabal-fix
-        , optparse-applicative >=0.17 && <0.19
+        , async          ^>=2.2
+        , base           >=4.7 && <5
+        , bytestring     >=0.11.3 && <0.13
+        , containers     >=0.6 && <0.7
+        , contravariant  ^>=1.5
+        , dlist          ^>=1.0
+        , exceptions     ^>=0.10
+        , kan-extensions ^>=5.2
+        , mtl            >=2.2.2 && <2.4
+        , profunctors    >=5.6.2 && <5.7
+        , semigroupoids  >=5.3 && <6.1
+        , stm            ^>=2.5.1
+        , text           >=1.2 && <2.1
+        , time           >=1.9 && <1.13
+    exposed-modules:
+        Box
+        Box.Box
+        Box.Codensity
+        Box.Committer
+        Box.Connectors
+        Box.Emitter
+        Box.Functor
+        Box.IO
+        Box.Queue
+        Box.Time
