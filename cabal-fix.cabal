@@ -106,17 +106,24 @@ library
         , flatparse          >=0.3.5 && <0.6
         , pretty             >=1.1.3 && <1.1.4
         , pretty-simple
+        , markup-parse
         , string-interpolate >=0.3 && <0.4
-    exposed-modules: Cabal.Fix
-    default-extensions:
+        , Diff
+        , tree-diff
+        , filepath
+    exposed-modules: CabalFix
 
-executable cabal-fixes
+executable cabal-fix
     import: ghc-options-exe-stanza
     import: ghc-options-stanza
     import: ghc2021-stanza
-    main-is: cabal-fixes.hs
+    main-is: cabal-fix.hs
     hs-source-dirs: app
     build-depends:
         , base                 >=4.7 && <5
+        , markup-parse
         , cabal-fix
         , optparse-applicative >=0.17 && <0.19
+        , filepath
+        , directory
+        , tree-diff

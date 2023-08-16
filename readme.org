@@ -41,7 +41,7 @@
 :set -XOverloadedStrings
 putStrLn "ok"
 import Data.Char
-import Cabal.Fix
+import CabalFix
 import System.Directory
 import Control.Monad
 import Data.List qualified as List
@@ -54,11 +54,13 @@ import Data.ByteString.Char8 qualified as C
 import Data.TreeDiff
 import Text.Pretty.Simple
 import Data.Algorithm.Diff
+import MarkupParse.Patch
+import System.FilePath
 #+end_src
 
 #+RESULTS:
-: [1 of 1] Compiling Cabal.Fix        ( src/Cabal/Fix.hs, interpreted ) [Source file changed]
 : Ok, one module loaded.
+: >
 : ok
 
 * Retrieve test cabals
@@ -418,7 +420,6 @@ void $ mapM (\(fp,bs) -> BS.writeFile ("/Users/tonyday/haskell/cabal-fix/test/re
 
 #+RESULTS:
 
-
 * individual directory cabal
 
 #+begin_src haskell :results output
@@ -428,3 +429,43 @@ rerenderFile fp cfg
 #+end_src
 
 #+RESULTS:
+
+
+
+* cabal-fix.hs development
+
+#+begin_src haskell :results output
+getCurrentDirectory
+#+end_src
+
+#+RESULTS:
+: /Users/tonyday/haskell/cabal-fix
+
+#+begin_src haskell :results output
+fp = "/Users/tonyday/haskell/perf/perf.cabal"
+cfg = defaultRenderConfig
+rerenderFile fp cfg
+#+end_src
+
+#+RESULTS:
+
+  #+begin_src haskell :results output
+import Data.TreeDiff
+fp = "/Users/tonyday/haskell/perf/perf.cabal"
+bs <- getCabal fp
+  #+end_src
+
+#+RESULTS:
+
+#+begin_src haskell :results output
+bs' = rerenderCabal defaultRenderConfig bs
+#+end_src
+
+#+RESULTS:
+
+#+begin_src haskell :results output
+ansiWlEditExpr <$> patch bs bs'
+#+end_src
+
+#+RESULTS:
+: Nothing

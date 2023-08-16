@@ -8,7 +8,7 @@
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 
-module Cabal.Fix
+module CabalFix
   (
     getCabal,
     putCabal,
@@ -129,8 +129,6 @@ import Data.TreeDiff hiding (FieldName)
 import Data.TreeDiff qualified as T
 import Data.Char
 import Data.Algorithm.Diff
-
-
 
 data RenderConfig =
   RenderConfig {

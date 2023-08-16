@@ -1,1 +1,3 @@
-packages: cabal-fix.cabal
+packages:
+  cabal-fix.cabal
+  ../markup-parse/markup-parse.cabal
