@@ -59,9 +59,18 @@ import System.FilePath
 #+end_src
 
 #+RESULTS:
-: Ok, one module loaded.
-: >
-: ok
+#+begin_example
+Build profile: -w ghc-9.6.2 -O1
+In order, the following will be built (use -v for more details):
+ - cabal-fix-0.0.0.1 (lib) (configuration changed)
+Configuring library for cabal-fix-0.0.0.1..
+Preprocessing library for cabal-fix-0.0.0.1..
+GHCi, version 9.6.2: https://www.haskell.org/ghc/  :? for help
+[1 of 1] Compiling CabalFix         ( src/CabalFix.hs, interpreted )
+Ok, one module loaded.
+ghci> Ok, one module loaded.
+ok
+#+end_example
 
 * Retrieve test cabals
 
@@ -435,19 +444,53 @@ rerenderFile fp cfg
 * cabal-fix.hs development
 
 #+begin_src haskell :results output
-getCurrentDirectory
+d <- getCurrentDirectory
+fp = takeBaseName d <> ".cabal"
+bs <- getCabal fp
+bs' = rerenderCabal defaultRenderConfig bs
+ansiWlEditExpr <$> patch bs bs'
 #+end_src
 
 #+RESULTS:
-: /Users/tonyday/haskell/cabal-fix
+#+begin_example
+Just BS.concat
+  [
+    +"        , Diff\n",
+    +"        , filepath\n",
+    +"        , markup-parse\n",
+    -"        , markup-parse\n",
+    -"        , Diff\n",
+    -"        , tree-diff\n",
+    -"        , filepath\n",
+    +"        , tree-diff          >=0.3 && <0.4\n",
+    -"        , markup-parse\n",
+    +"        , cabal-fix\n",
+    -"        , cabal-fix\n",
+    +"        , markup-parse\n"]
+#+end_example
+
 
 #+begin_src haskell :results output
-fp = "/Users/tonyday/haskell/perf/perf.cabal"
-cfg = defaultRenderConfig
 rerenderFile fp cfg
 #+end_src
 
 #+RESULTS:
+#+begin_example
+Just BS.concat
+  [
+    +"        , Diff\n",
+    +"        , filepath\n",
+    +"        , markup-parse\n",
+    -"        , markup-parse\n",
+    -"        , Diff\n",
+    -"        , tree-diff\n",
+    -"        , filepath\n",
+    +"        , tree-diff          >=0.3 && <0.4\n",
+    -"        , markup-parse\n",
+    +"        , cabal-fix\n",
+    -"        , cabal-fix\n",
+    +"        , markup-parse\n"]
+#+end_example
 
   #+begin_src haskell :results output
 import Data.TreeDiff

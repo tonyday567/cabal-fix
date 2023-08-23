@@ -3,13 +3,13 @@
 -- | basic measurement and callibration
 module Main where
 
-import Options.Applicative
 import CabalFix
-import Prelude
-import System.FilePath
-import System.Directory
 import Data.TreeDiff
 import MarkupParse.Patch
+import Options.Applicative
+import System.Directory
+import System.FilePath
+import Prelude
 
 data FixOptions = FixOptions
   { fixInplace :: Bool
