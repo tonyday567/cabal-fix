@@ -90,6 +90,16 @@ module CabalFix
     allCabals,
     printFieldsComments,
     cats,
+    depOtherP,
+    nota,
+    untilP,
+    depNameP,
+    depPs',
+    intercalated,
+    lt,
+    lte,
+    gt,
+    gte,
   )
 where
 
@@ -116,7 +126,6 @@ import Data.TreeDiff.OMap qualified as O
 import Distribution.Fields
 import Distribution.Fields.Field hiding (fieldUniverse)
 import Distribution.Parsec.Position
-import Distribution.Parsec.Position (Position)
 import Distribution.Pretty
 import Distribution.Utils.Generic
 import FlatParse.Basic (Parser)
@@ -494,8 +503,6 @@ rawBuildDeps xs =
         )
         libImports
 
--- * streamly 'Fold's
-
 count_ :: (Ord a) => [a] -> Map.Map a Int
 count_ = foldl' (\x a -> Map.insertWith (+) a 1 x) Map.empty
 
@@ -871,7 +878,7 @@ licenseF = Field (Name (Position 0 1) "license") [FieldLine (Position 0 21) "BSD
 licenseFileF :: Field Position
 licenseFileF = Field (Name (Position 0 1) "license-file") [FieldLine (Position 0 21) "LICENSE"]
 
-initialPackageChar :: Parser () Char
+initialPackageChar :: Parser e Char
 initialPackageChar =
   FP.satisfyAscii
     ( `C.elem`
@@ -882,7 +889,7 @@ initialPackageChar =
         )
     )
 
-packageChar :: Parser () Char
+packageChar :: Parser e Char
 packageChar =
   FP.satisfyAscii
     ( `C.elem`
@@ -894,12 +901,16 @@ packageChar =
         )
     )
 
-validName :: Parser () String
+validName :: Parser e String
 validName = (:) <$> initialPackageChar <*> FP.many packageChar
 
 data Dep = Dep {dep :: ByteString, depRange :: Maybe DepRange} deriving (Show, Ord, Eq, Generic)
 
-data DepRange = DepCaret ByteString | DepLower ByteString | DepRange ByteString ByteString | DepUpper ByteString deriving (Show, Eq, Ord, Generic)
+data DepBound = DepEq | DepCaret | DepStar | DepLTE | DepLT | DepGTE | DepGT deriving (Eq, Show)
+
+data DepConnector = DepAnd | DepOr deriving (Eq, Show)
+
+data DepSet = DepSet [Either (DepBound, Version) DepConnector] deriving (Show, Eq, Ord, Generic)
 
 printDepRange :: DepRange -> ByteString
 printDepRange (DepCaret v) = "^>=" <> v
@@ -931,7 +942,7 @@ printDepsPreferred libd DepAligned ds = zipWith (printDepPreferred libd) ns ds
     ls = BS.length . dep <$> ds
     ns = (\x -> maximum ls - x + 1) <$> ls
 
-depP :: Parser () Dep
+depP :: Parser e Dep
 depP =
   Dep
     <$> ( FP.optional prefixComma
@@ -942,46 +953,96 @@ depP =
     <*> FP.optional depRangeP
     <* FP.optional postfixComma
 
-depRangeP :: Parser () DepRange
+depP' :: Parser e Dep'
+depP' =
+  Dep'
+    <$> (
+            ws
+            *> (FP.byteStringOf validName)
+            <* ws
+        )
+    <*> FP.optional ((Left <$> depRangeP) FP.<|> (Right <$> nota ','))
+    <* ws
+
+depPs' :: Parser e [Dep']
+depPs' =
+  FP.optional (ws *> $(FP.char ',')) *>
+  intercalated depP' $(FP.char ',')
+  <* FP.optional (ws *> $(FP.char ','))
+
+intercalated :: FP.Parser e item -> FP.Parser e sep -> FP.Parser e [item]
+intercalated item sep =
+  (:) <$> item <*> FP.chainr (:) (sep *> item) (pure [])
+
+data Dep' = Dep' {dep' :: ByteString, depRange' :: Maybe (Either DepRange ByteString)} deriving (Show, Ord, Eq, Generic)
+
+depOtherP :: Parser e (ByteString, ByteString)
+depOtherP =
+  (,) <$>
+  (FP.optional prefixComma
+            *> ws
+            *> (FP.byteStringOf validName)
+            <* ws
+  )
+  <*> (untilP ',')
+
+depNameP :: Parser e ByteString
+depNameP = either dep fst <$>
+  (Left <$> depP) FP.<|>
+  (Right <$> depOtherP)
+
+nota :: Char -> FP.Parser e ByteString
+nota c = FP.withSpan (FP.skipMany (FP.satisfy (/= c))) (\() s -> FP.unsafeSpanToByteString s)
+
+untilP :: Char -> FP.Parser e ByteString
+untilP c = nota c <* FP.satisfy (==c)
+
+depRangeP :: Parser e DepRange
 depRangeP =
   ws
     *> ( (DepCaret <$> (caret *> ws *> version))
            FP.<|> ( DepRange
-                      <$> (lower *> ws *> version)
+                      <$> (gte *> ws *> version)
                       <* ws
                       <* amps
                       <* ws
-                      <*> (upper *> ws *> version)
+                      <*> (lt *> ws *> version)
                   )
-           FP.<|> (DepLower <$> (lower *> ws *> version))
+           FP.<|> (DepLower <$> (gte *> ws *> version))
        )
     <* ws
 
-prefixComma :: Parser () ()
+prefixComma :: Parser e ()
 prefixComma = $(FP.string ", ")
 
-postfixComma :: Parser () ()
+postfixComma :: Parser e ()
 postfixComma = $(FP.string ",")
 
-space :: Parser () ()
+space :: Parser e ()
 space = $(FP.string " ")
 
-ws :: Parser () ()
+ws :: Parser e ()
 ws = pure () <* FP.many space
 
-caret :: Parser () ()
+caret :: Parser e ()
 caret = $(FP.string "^>=")
 
-lower :: Parser () ()
-lower = $(FP.string ">=")
+gte :: Parser e ()
+gte = $(FP.string ">=")
 
-upper :: Parser () ()
-upper = $(FP.string "<")
+gt :: Parser e ()
+gt = $(FP.string ">")
 
-amps :: Parser () ()
+lt :: Parser e ()
+lt = $(FP.string "<")
+
+lte :: Parser e ()
+lte = $(FP.string "<=")
+
+amps :: Parser e ()
 amps = $(FP.string "&&")
 
-versionChar :: Parser () Char
+versionChar :: Parser e Char
 versionChar =
   FP.satisfyAscii
     ( `C.elem`
@@ -991,7 +1052,7 @@ versionChar =
         )
     )
 
-version :: Parser () ByteString
+version :: Parser e ByteString
 version = FP.byteStringOf (FP.some versionChar)
 
 parseOK :: Parser e a -> ByteString -> Either ByteString a

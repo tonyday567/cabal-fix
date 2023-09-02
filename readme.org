@@ -5,31 +5,11 @@
 
 ~cabal-fix~ helps fix warts in your cabal files.
 
-** ToDo cabal fixes
+* Next cabal-fix tar
 
-- [ ] check individual project diffs
-  - [ ] cabal build & cabal check
-  - [ ] commit
-- [ ] eulerproject cabal
-- [X] insert LICENSE
-- [X] add copyright
-  - [X] based on years
-- [X] revert category
-
-- [X] test the config sucker
-- [X] narrow method for build-deps
-- [X] bugz
-  - [X] description always has an extra line
-  - [X] build-deps not working
-
-- [X] overwrites
-  - [X] policy
-- [X] fixCommas
-  - [X] commastyle
-- [X] sortFields
-- [X] sortFieldLines
-- [X] removeBlankFields
-- [X] fixBuildDeps
+- [ ] transfer research-hackage functionality over here
+- [ ] reproduce r&d there
+- [ ] explore dependency ranges
 
 * cabal file listing
 
@@ -39,9 +19,10 @@
 :set -Wno-type-defaults
 :set -Wno-name-shadowing
 :set -XOverloadedStrings
-putStrLn "ok"
 import Data.Char
 import CabalFix
+import CabalFix.Archive
+import qualified Codec.Archive.Tar as Tar
 import System.Directory
 import Control.Monad
 import Data.List qualified as List
@@ -49,28 +30,634 @@ import Data.Function
 import Box
 import Data.Bifunctor
 import Data.ByteString (ByteString)
-import Data.ByteString qualified as B
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BSL
 import Data.ByteString.Char8 qualified as C
-import Data.TreeDiff
-import Text.Pretty.Simple
-import Data.Algorithm.Diff
-import MarkupParse.Patch
-import System.FilePath
+import FlatParse.Basic qualified as FP
+import NumHask.Space
+import Data.Map.Strict qualified as Map
+import Data.Ord
+import Data.Either
+-- es <- cabalEntries
+-- rs = filter ((/= "package.json") . filenameFN . runP filenameP . FP.strToUtf8 . fst) $ (\xs -> filter (not . (List.isSuffixOf "preferred-versions") . fst) xs) $ [(fp,bs) | (fp, Tar.NormalFile bs _) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
+vlibs <- Map.delete "acme-everything" <$> validLatestLibs
+Map.size vlibs
+#+end_src
+
+#+RESULTS:
+: [1 of 2] Compiling CabalFix         ( src/CabalFix.hs, interpreted ) [Source file changed]
+: Ok, two modules loaded.
+: >
+: >
+: > >
+: 15691
+
+* tar development
+** entries
+#+begin_src haskell :results output
+Tar.entryPath <$> take 5 es
+#+end_src
+
+#+RESULTS:
+: ["iconv/0.2/iconv.cabal","Crypto/3.0.3/Crypto.cabal","HDBC/1.0.1/HDBC.cabal","HDBC-odbc/1.0.1.0/HDBC-odbc.cabal","HDBC-postgresql/1.0.1.0/HDBC-postgresql.cabal"]
+
+
+3 seconds
+
+#+begin_src haskell :results output
+length es
+#+end_src
+
+#+RESULTS:
+: 310933
+
+
+#+begin_src haskell :results output
+(length $ filter (isNormalFile . Tar.entryContent) es) == length es
+#+end_src
+
+#+RESULTS:
+: True
+
+** Maximum file size:
+
+#+begin_src haskell :results output
+(\xs -> filter ((maximum (snd <$> xs) ==) . snd) xs) $ [(fp,x) | (fp, Tar.NormalFile _ x) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
+#+end_src
+
+#+RESULTS:
+: [("acme-everything/2018.11.18/acme-everything.cabal",261865)]
+
+** zero size
+
+#+begin_src haskell :results output
+(\xs -> filter ((0 ==) . snd) xs) $ [(fp,x) | (fp, Tar.NormalFile _ x) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
+#+end_src
+
+#+RESULTS:
+: [("lzma/preferred-versions",0),("signal/preferred-versions",0),("peyotls-codec/preferred-versions",0),("th-orphans/preferred-versions",0),("GPipe/preferred-versions",0),("GPipe/preferred-versions",0),("base-orphans/preferred-versions",0),("MailchimpSimple/preferred-versions",0),("warp/preferred-versions",0),("table-layout/preferred-versions",0),("d3d11binding/preferred-versions",0),("shakespeare-sass/preferred-versions",0),("kawhi/preferred-versions",0),("hip/preferred-versions",0),("lowgl/preferred-versions",0),("lowgl/preferred-versions",0),("NetSNMP/preferred-versions",0),("xml-conduit/preferred-versions",0),("penrose/preferred-versions",0),("aeson-diff/preferred-versions",0),("milena/preferred-versions",0),("hruby/preferred-versions",0),("hruby/preferred-versions",0),("parsec/preferred-versions",0),("qchas/preferred-versions",0),("monadiccp/preferred-versions",0),("preprocessor-tools/preferred-versions",0),("line-bot-sdk/preferred-versions",0),("debug-dump/preferred-versions",0),("microlens-process/preferred-versions",0),("doldol/preferred-versions",0),("doldol/preferred-versions",0),("tensorflow-core-ops/preferred-versions",0),("bitwise-enum/preferred-versions",0),("bitwise-enum/preferred-versions",0),("simple-cabal/preferred-versions",0),("zip/preferred-versions",0),("shake-plus/preferred-versions",0),("tasty-html/preferred-versions",0),("logict/preferred-versions",0),("hw-kafka-client/preferred-versions",0),("geojson/preferred-versions",0),("dialogue/preferred-versions",0),("scalendar/preferred-versions",0)]
+
+** preferred-versions
+
+[[https://hackage.haskell.org/package/Cabal/preferred][Cabal: preferred and deprecated versions | Hackage]]
+
+#+begin_src haskell :results output
+take 3 $ (\xs -> filter ((List.isSuffixOf "preferred-versions") . fst) xs) $ [(fp,bs) | (fp, Tar.NormalFile bs _) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
+#+end_src
+
+#+RESULTS:
+: [("ADPfusion/preferred-versions","ADPfusion <0.4.0.0 || >0.4.0.0"),("AesonBson/preferred-versions","AesonBson <0.2.0 || >0.2.0 && <0.2.1 || >0.2.1"),("BiobaseXNA/preferred-versions","BiobaseXNA <0.9.1.0 || >0.9.1.0")]
+
+#+begin_src haskell :results output
+length $ (\xs -> filter ((List.isSuffixOf "preferred-versions") . fst) xs) $ [(fp,bs) | (fp, Tar.NormalFile bs _) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
+#+end_src
+
+#+RESULTS:
+: 3280
+
+** package.json
+
+=package-json= content is a security/signing feature you can read about in [[https://github.com/haskell/hackage-security/blob/master/README.md][hackage-security]].
+
+#+begin_src haskell :results output
+length $ filter ((== "package.json") . filenameFN . runP filenameP . FP.strToUtf8 . fst) $ filter (not . (List.isSuffixOf "preferred-versions") . fst) $ [(fp,bs) | (fp, Tar.NormalFile bs _) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
+#+end_src
+
+#+RESULTS:
+: 134994
+
+** filename conventions
+
+Either *.cabal, preferred_version or package.json
+
+#+begin_src haskell :results output
+filename . FP.strToUtf8 . fst <$> take 20 rs
+#+end_src
+
+#+RESULTS:
+: [FileName {name = "iconv", version = "0.2", fileName = "iconv.cabal"},FileName {name = "Crypto", version = "3.0.3", fileName = "Crypto.cabal"},FileName {name = "HDBC", version = "1.0.1", fileName = "HDBC.cabal"},FileName {name = "HDBC-odbc", version = "1.0.1.0", fileName = "HDBC-odbc.cabal"},FileName {name = "HDBC-postgresql", version = "1.0.1.0", fileName = "HDBC-postgresql.cabal"},FileName {name = "HDBC-sqlite3", version = "1.0.1.0", fileName = "HDBC-sqlite3.cabal"},FileName {name = "darcs-graph", version = "0.1", fileName = "darcs-graph.cabal"},FileName {name = "hask-home", version = "2006.3.23", fileName = "hask-home.cabal"},FileName {name = "hmp3", version = "1.1", fileName = "hmp3.cabal"},FileName {name = "lambdabot", version = "4.0", fileName = "lambdabot.cabal"},FileName {name = "parsedate", version = "2006.6.4", fileName = "parsedate.cabal"},FileName {name = "plugins", version = "1.0", fileName = "plugins.cabal"},FileName {name = "zlib", version = "0.2", fileName = "zlib.cabal"},FileName {name = "bzlib", version = "0.2", fileName = "bzlib.cabal"},FileName {name = "libxml", version = "0.1", fileName = "libxml.cabal"},FileName {name = "xslt", version = "0.1", fileName = "xslt.cabal"},FileName {name = "hxweb", version = "0.1", fileName = "hxweb.cabal"},FileName {name = "HGL", version = "3.1", fileName = "HGL.cabal"},FileName {name = "GLUT", version = "2.0", fileName = "GLUT.cabal"},FileName {name = "HUnit", version = "1.1", fileName = "HUnit.cabal"}]
+
+#+begin_src haskell :results output
+take 20 $ filter ((/="package.json") . fileName) $ filter (\f -> (CabalFix.Archive.name f <> ".cabal") /= (fileName f)) $ filename . FP.strToUtf8 . fst <$> rs
+#+end_src
+
+#+RESULTS:
+: []
+
+#+begin_src haskell :results output
+take 2 $ filter ((/="package.json") . fileName . filename . FP.strToUtf8 . fst) $ rs
+#+end_src
+
+** version ranges
+
+#+begin_src haskell :results output
+length $ (CabalFix.Archive.version . versionFN . filename . FP.strToUtf8 . fst) <$> rs
+#+end_src
+
+#+RESULTS:
+: 134994
+
+#+begin_src haskell :results output
+mVersions = Map.fromListWith (<>) $ ((\x -> (nameFN x, (:[]) $ CabalFix.Archive.version (versionFN x))) . filename . FP.strToUtf8 . fst) <$> rs
+#+end_src
+
+#+RESULTS:
+
+#+begin_src haskell :results output
+join $ space1 <$> Map.lookup "chart-svg" mVersions :: (Maybe (RangeEP Version))
+#+end_src
+
+#+RESULTS:
+: Just (RangeEP {rangeEP = Range Version [0,0,1] Version [0,5,1,0], lowerEP = Opened, upperEP = Opened})
+
+#+begin_src haskell :results output
+x1 = fromMaybe undefined $ join $ space1 <$> Map.lookup "chart-svg" mVersions :: (RangeEP Version)
+#+end_src
+
+#+RESULTS:
+
+#+begin_src haskell :results output
+x1 = fromMaybe undefined $ Map.lookup "chart-svg" mVersions
+x1
+#+end_src
+
+#+RESULTS:
+: [Version [0,5,1,0],Version [0,5,0,0],Version [0,4,1,1],Version [0,4,1,0],Version [0,4,0],Version [0,3,3],Version [0,3,2],Version [0,3,1],Version [0,3,0],Version [0,2,3],Version [0,2,2],Version [0,2,1],Version [0,2,0],Version [0,1,3],Version [0,1,2],Version [0,1,1],Version [0,1,0],Version [0,0,3],Version [0,0,2],Version [0,0,1]]
+
+#+begin_src haskell :results output
+minimum x1
+#+end_src
+
+#+RESULTS:
+: Version [0,0,1]
+
+**** all versions are unique?
+
+#+begin_src haskell :results output
+take 10 $ Map.toList $ Map.filter (\a -> length a /= length (List.nub a)) mVersions
+#+end_src
+
+#+RESULTS:
+: []
+
+**** Version counts
+
+#+begin_src haskell :results output
+take 10 $ List.sortOn (Down . snd) $ Map.toList $ Map.map length mVersions
+#+end_src
+
+#+RESULTS:
+: [("haskoin-store",293),("git-annex",278),("hlint",221),("yesod-core",213),("warp",201),("purescript",200),("egison",190),("hakyll",190),("pandoc",187),("persistent",184)]
+
+** latest cabals
+
+#+begin_src haskell :results output
+getVersion = runP versionP . versionFN . filename . FP.strToUtf8 . fst
+mLatest = Map.fromListWith (\v v' -> bool v' v (getVersion v > getVersion v')) $ (\x -> (nameFN . filename . FP.strToUtf8 . fst $ x, x)) <$> rs
+#+end_src
+
+#+RESULTS:
+
+#+begin_src haskell :results output
+length $ (second fst <$> (Map.toList $ mLatest))
+#+end_src
+
+#+RESULTS:
+: 17445
+
+** readFields
+
+A few packages give a bad readFields
+
+#+begin_src haskell :results output
+Map.map fst $ Map.filter (isLeft . readFields . BSL.toStrict . snd) $ mLatest -- readFields
+#+end_src
+
+#+RESULTS:
+: fromList [("DSTM","DSTM/0.1.2/DSTM.cabal"),("control-monad-exception-mtl","control-monad-exception-mtl/0.10.3/control-monad-exception-mtl.cabal"),("ds-kanren","ds-kanren/0.2.0.1/ds-kanren.cabal"),("metric","metric/0.2.0/metric.cabal"),("phasechange","phasechange/0.1/phasechange.cabal"),("smartword","smartword/0.0.0.5/smartword.cabal")]
+
+#+RESULTS:
+
+
+
+
+
+** field counts
+*** author
+
+#+begin_src haskell :results output
+take 40 $ List.sortOn (Down . snd) $ Map.toList $ count_ $ mconcat $ fmap snd $ Map.toList $ Map.map (mconcat . fmap author . snd) vlls
+#+end_src
+
+#+RESULTS:
+: [("Brendan Hay",529),("Nikita Volkov <nikita.y.volkov@mail.ru>",148),("Tom Sydney Kerckhove",119),("Andrew Martin",110),("Edward A. Kmett",99),("OleksandrZhabenko",88),("Henning Thielemann <haskell@henning-thielemann.de>",87),("Michael Snoyman",83),("Daniel Firth",80),("M Farkas-Dyck",79),("Vanessa McHale",75),("Vincent Hanquez <vincent@snarc.org>",63),("Chris Martin",61),("Oleg Grenrus <oleg.grenrus@iki.fi>",59),("Renzo Carbonara",57),("Michael Snoyman <michael@snoyman.com>",52),("Tony Morris <\202\135\199\157u\203\153s\196\177\201\185\201\185o\201\175\202\135@\215\159\215\159\199\157\202\158s\201\144\201\165>",50),("I\195\177aki Garc\195\173a Etxebarria",48),("chessai",48),("Fumiaki Kinoshita",47),("John Ky",46),("Ian Duncan",45),("Chris Done",42),("Athan Clark",39),("Chris Penner",36),("Jeremy Shaw",35),("Kazu Yamamoto <kazu@iij.ad.jp>",35),("Bryan O'Sullivan <bos@serpentine.com>",34),("Herbert Valerio Riedel",34),("John Wiegley",34),("Torsten Schmits",34),("Marco Zocca",33),("Jakub Waszczuk",32),("Jinjing Wang",32),("Rohan Drape",32),("HirotomoMoriwaki<philopon.dependence@gmail.com>",31),("James Cook <mokus@deepbondi.net>",31),("Jonathan Fischoff",31),("Justin Le",30),("Obsidian Systems LLC",30)]
+
+*** libraries
+
+not libraries
+
+#+begin_src haskell :exports both
+Map.size $ Map.filter ((0==) . length) $ fmap (catMaybes . fmap (sec "library") . snd) vlls
+#+end_src
+
+#+RESULTS:
+: 0
+
+multiple libraries
+
+#+begin_src haskell :exports both
+Map.size $ Map.filter ((>1) . length) $ fmap (catMaybes . fmap (sec "library") . snd) vlls
+#+end_src
+
+#+RESULTS:
+: 89
+
+Multiple libraries are usually "internal" libraries that can only be used inside the cabal file.
+
+#+begin_src haskell :results output
+take 10 $ Map.toList $ Map.filter (\x -> x/=[[]] && x/=[] && listToMaybe x /= Just []) $ fmap (fmap (fmap secName) . fmap fst . catMaybes . fmap (sec "library") . snd) vlls
+#+end_src
+
+#+RESULTS:
+: [("LiterateMarkdown",[[("name","converter")]]),("attoparsec",[[("name","attoparsec-internal")],[]]),("balkon",[[("name","balkon-internal")],[]]),("buffet",[[("name","buffet-internal")]]),("cabal-fmt",[[("name","version-interval")],[("name","cabal-fmt-internal")]]),("cuckoo",[[("name","random-internal")],[]]),("dhrun",[[("name","dhrun-lib")]]),("escoger",[[("name","escoger-lib")]]),("ghc-plugs-out",[[("name","no-op-plugin")],[("name","undefined-init-plugin")],[("name","undefined-solve-plugin")],[("name","undefined-stop-plugin")],[("name","call-count-plugin")]]),("hackage-cli",[[("name","cabal-revisions")]])]
+
+*** common stanzas
+
+#+begin_src haskell :exports both
+length $ Map.toList $ Map.filter (/=[]) $ fmap (catMaybes . fmap (sec "common")) $ fmap snd vlls
+#+end_src
+
+#+RESULTS:
+: 817
+
+valid cabal files that have a library section:
+
+#+begin_src haskell :exports both
+vlibs <- Map.delete "acme-everything" <$> validLatestLibs
+Map.size vlibs
+#+end_src
+
+#+RESULTS:
+: 15691
+
+** dependencies
+
+Total number of build dependencies in library stanzas and in common stanzas:
+
+#+begin_src haskell :results output :exports both
+sum $ fmap snd $ Map.toList $ fmap (sum . fmap length) $ fmap (fmap (fieldValues "build-depends")) $ Map.filter (/=[]) $ fmap (fmap snd . catMaybes . fmap (sec "library") . snd) vlibs
+
+sum $ fmap snd $ Map.toList $ fmap (sum . fmap length) $ fmap (fmap (fieldValues "build-depends")) $ Map.filter (/=[]) $ fmap (fmap snd . catMaybes . fmap (sec "common") . snd) vlibs
+#+end_src
+
+#+RESULTS:
+: 103646
+: > 4309
+
+
+no dependencies
+
+#+begin_src haskell :exports both
+Map.size $ Map.filter (==[]) $ fmap (rawBuildDeps . snd) $ vlibs
+#+end_src
+
+#+RESULTS:
+: 0
+
+unique dependencies
+
+#+begin_src haskell
+Map.size $ fmap (fmap mconcat) $ Map.filter (/=[]) $ fmap (rawBuildDeps . snd) $ vlibs
+#+end_src
+
+#+RESULTS:
+: 15691
+
+
+raw build-deps example:
+
+#+begin_src haskell :exports both
+take 1 $ Map.toList $ fmap (fmap mconcat) $ Map.filter (/=[]) $ fmap (rawBuildDeps . snd) $ vlibs
+#+end_src
+
+#+RESULTS:
+| 2captcha | (aeson >=1.5.6.0 && <1.6,base >=4.7 && <5,bytestring >=0.10.12.0 && <0.11,clock >=0.8.2 && <0.9,exceptions >=0.10.4 && <0.11,http-client >=0.6.4.1 && <0.7,lens >=4.19.2 && <4.20,lens-aeson >=1.1.1 && <1.2,parsec >=3.1.14.0 && <3.2,text >=1.2.4.1 && <1.3,wreq >=0.5.3.3 && <0.6 ) |
+
+lex check:
+
+#+begin_src haskell :exports both
+count_ $ mconcat $ C.unpack <$> (mconcat $ fmap snd $ Map.toList $ fmap (fmap mconcat) $ Map.filter (/=[]) $ fmap (rawBuildDeps . snd) $ vlibs)
+#+end_src
+
+#+RESULTS:
+: fromList [('\t',42),(' ',612764),('&',92444),('(',407),(')',407),('*',6092),(',',98962),('-',34736),('.',150840),('0',83176),('1',67855),('2',36140),('3',21486),('4',31266),('5',23699),('6',10232),('7',10040),('8',6971),('9',6832),(':',14),('<',48328),('=',83703),('>',69423),('A',268),('B',250),('C',1163),('D',478),('E',76),('F',144),('G',346),('H',827),('I',103),('J',118),('K',15),('L',512),('M',404),('N',79),('O',288),('P',437),('Q',630),('R',247),('S',559),('T',540),('U',203),('V',75),('W',74),('X',92),('Y',24),('Z',17),('^',3540),('a',78809),('b',31443),('c',38258),('d',21394),('e',116163),('f',13078),('g',17544),('h',17795),('i',56014),('j',560),('k',8065),('l',36406),('m',27827),('n',57888),('o',50899),('p',30414),('q',2555),('r',71341),('s',83835),('t',95736),('u',14954),('v',7103),('w',4024),('x',10849),('y',19211),('z',1675),('{',98),('|',2364),('}',98)]
+
+** deps
+
+#+begin_src haskell :results output
+mDeps = fmap (runP (FP.many depNameP) . mconcat . mconcat . rawBuildDeps . snd) vlibs
+#+end_src
+
+#+begin_src haskell :results output
+take 40 $ List.sortOn (Down . snd) $ Map.toList $ count_ $ mconcat $ toList mDeps
+#+end_src
+
+#+RESULTS:
+: [("base",14790),("bytestring",4308),("containers",3690),("text",3682),("mtl",2576),("transformers",2168),("aeson",1849),("time",1339),("vector",1311),("directory",1217),("filepath",1141),("template-haskell",1100),("deepseq",1008),("unordered-containers",978),("lens",900),("binary",747),("array",730),("hashable",721),("exceptions",684),("attoparsec",654),("process",613),("stm",576),("http-types",568),("random",556),("network",533),("parsec",523),("QuickCheck",472),("data-default",465),("async",405),("primitive",392),("conduit",390),("http-client",383),("amazonka-core",362),("ghc-prim",357),("semigroups",340),("split",325),("monad-control",311),("scientific",300),("wai",291),("resourcet",285)]
+
+
+*** dep parse errors
+
+#+begin_src haskell :results output
+take 2 $ Map.toList $ Map.filter (/="") $ fmap (mconcat . mconcat . rawBuildDeps . snd) $ Map.filter (isLeft . runParserEither' (depPs') . mconcat . mconcat . rawBuildDeps . snd) vlibs
+#+end_src
+
+#+RESULTS:
+: [("AppleScript",""),("BiGUL","")]
+
+#+begin_src haskell :results output
+FP.runParser depNameP "base < 5 && >= 3,linear,newtype"
+#+end_src
+
+#+RESULTS:
+: OK "base" "< 5 && >= 3,linear,newtype"
+
+
+#+begin_src haskell :results output
+take 4 $ Map.toList $ fmap (second (mconcat . mconcat . rawBuildDeps)) $ Map.filter (isLeft . (runParserEither (FP.many depNameP)) . mconcat . mconcat . rawBuildDeps . snd) vlibs
+
+#+end_src
+
+#+RESULTS:
+: []
+
+#+begin_src haskell :results output :exports both
+deps = fmap (fromRight undefined . parseDeps . mconcat . mconcat . rawBuildDeps . snd) vlibs
+Map.size deps
+sum $ Map.elems $ fmap length deps
 #+end_src
 
 #+RESULTS:
 #+begin_example
-Build profile: -w ghc-9.6.2 -O1
-In order, the following will be built (use -v for more details):
- - cabal-fix-0.0.0.1 (lib) (configuration changed)
-Configuring library for cabal-fix-0.0.0.1..
-Preprocessing library for cabal-fix-0.0.0.1..
-GHCi, version 9.6.2: https://www.haskell.org/ghc/  :? for help
-[1 of 1] Compiling CabalFix         ( src/CabalFix.hs, interpreted )
-Ok, one module loaded.
-ghci> Ok, one module loaded.
-ok
+<interactive>:619:36-44: error: [GHC-88464]
+    Variable not in scope: parseDeps :: ByteString -> Either a0 b
+    Suggested fix:
+      Perhaps use one of these:
+        ‘parseDep’ (line 1002), ‘parseDepFL’ (line 328)
+<interactive>:620:10-13: error: [GHC-88464]
+    Variable not in scope: deps :: Map.Map k0 a0
+    Suggested fix:
+      Perhaps use one of these:
+        ‘dep’ (line 899), ‘eps’ (imported from NumHask.Space),
+        ‘depP’ (line 934)
+<interactive>:621:31-34: error: [GHC-88464]
+    Variable not in scope: deps :: Map.Map k0 (t0 a0)
+    Suggested fix:
+      Perhaps use one of these:
+        ‘dep’ (line 899), ‘eps’ (imported from NumHask.Space),
+        ‘depP’ (line 934)
 #+end_example
+
+#+begin_src haskell :results output :exports both
+take 3 $ Map.toList deps
+#+end_src
+
+#+RESULTS:
+: [("2captcha",["aeson","base","bytestring","clock","exceptions","http-client","lens","lens-aeson","parsec","text","wreq"]),("3dmodels",["base","attoparsec","bytestring","linear","packer"]),("AAI",["base"])]
+
+packages with the most dependencies:
+
+#+begin_src haskell :exports both
+take 20 $ List.sortOn (Down . snd) $ fmap (second length) $ Map.toList deps
+#+end_src
+
+#+RESULTS:
+| yesod-platform  | 132 |
+| hackport        | 127 |
+| planet-mitchell | 109 |
+| raaz            | 104 |
+| hevm            |  84 |
+| sockets         |  82 |
+| btc-lsp         |  71 |
+| too-many-cells  |  70 |
+| ghcide          |  69 |
+| pandoc          |  68 |
+| cachix          |  67 |
+| sprinkles       |  67 |
+| emanote         |  64 |
+| freckle-app     |  64 |
+| pantry-tmp      |  64 |
+| taffybar        |  63 |
+| neuron          |  61 |
+| project-m36     |  61 |
+| NGLess          |  60 |
+| stack           |  59 |
+
+dependees
+
+#+begin_src haskell :exports both
+fmap (take 20) $ fmap (List.sortOn (Down . snd)) $ fmap Map.toList $ S.fold count $ S.concatMap S.fromList $ S.fromList $ fmap snd $ Map.toList deps
+#+end_src
+
+#+RESULTS:
+| base                 | 14709 |
+| bytestring           |  5399 |
+| text                 |  4969 |
+| containers           |  4712 |
+| mtl                  |  3473 |
+| transformers         |  3069 |
+| aeson                |  2021 |
+| time                 |  1932 |
+| vector               |  1797 |
+| directory            |  1608 |
+| filepath             |  1532 |
+| template-haskell     |  1456 |
+| unordered-containers |  1388 |
+| deepseq              |  1248 |
+| lens                 |  1175 |
+| binary               |   932 |
+| hashable             |   930 |
+| array                |   889 |
+| exceptions           |   855 |
+| process              |   851 |
+
+
+All the dependees found:
+
+#+begin_src haskell :exports both
+bdnames <- fmap (fmap fst) $ fmap Map.toList $ S.fold count $ S.concatMap S.fromList $ S.fromList $ fmap snd $ Map.toList deps
+
+length bdnames
+#+end_src
+
+#+RESULTS:
+: > 5873
+
+*** dependency name errors
+
+dependees not in the cabal index:
+
+#+begin_src haskell :results output :exports both
+length $ filter (not . (`elem` (Map.keys vlibs))) bdnames
+
+take 10 $ filter (not . (`elem` (Map.keys vlibs))) bdnames
+
+#+end_src
+
+#+RESULTS:
+: 233
+: > ["Codec-Compression-LZF","Consumer","DOM","DebugTraceHelpers","FieldTrip","FindBin","HJavaScript","HTTP-Simple","Imlib","LRU"]
+
+excluding these:
+
+#+begin_src haskell :results output :exports both
+depsExclude = filter (not . (`elem` (Map.keys vlibs))) bdnames
+vdeps = fmap (filter (not . (`elem` depsExclude))) deps
+Map.size vdeps
+sum $ fmap snd $ Map.toList $ fmap length vdeps
+#+end_src
+
+#+RESULTS:
+:
+: > 14779
+: 106238
+
+*** ToDo potential error sources
+
+- [X] error 1 - commas can be inside braces
+
+- [ ] error 2 - plain old dodgy depends
+  acme-everything, cabal, deprecated packages
+
+- [ ] error 3 - multiple build-depends in one stanza
+
+- [ ] error 4 - cpp & conditionals
+
+- [ ] error 5 - packages not on Hackage
+
+   cardano
+   "This library requires quite a few exotic dependencies from the cardano realm which aren't necessarily on hackage nor stackage. The dependencies are listed in stack.yaml, make sure to also include those for importing cardano-transactions." ~ https://raw.githubusercontent.com/input-output-hk/cardano-haskell/d80bdbaaef560b8904a828197e3b94e667647749/snapshots/cardano-1.24.0.yaml
+
+- [ ] error 6 - internal library (only available to the main cabal library stanza)
+  yahoo-prices, vector-endian, symantic-parser
+
+Empty lists are mostly due to bad conditional parsing
+
+ #+begin_src haskell :exports both
+ Map.size $ Map.filter null deps
+ #+end_src
+
+ #+RESULTS:
+ : 243
+
+** algebraic-graphs
+
+An (algebraic) graph of dependencies:
+
+#+begin_src haskell :results output
+depG = stars (Map.toList vdeps)
+#+end_src
+
+#+begin_src haskell
+:t depG
+#+end_src
+
+#+RESULTS:
+: depG :: Algebra.Graph.Graph String
+
+#+begin_src haskell
+ToGraph.preSet "folds" depG
+#+end_src
+
+#+RESULTS:
+: fromList ["folds-common","mealy","online","proton"]
+
+#+begin_src haskell
+ToGraph.postSet "folds" depG
+#+end_src
+
+#+RESULTS:
+: fromList ["adjunctions","base","bifunctors","comonad","constraints","contravariant","data-reify","distributive","lens","mtl","pointed","profunctors","reflection","semigroupoids","transformers","unordered-containers","vector"]
+
+https://hackage.haskell.org/package/proton
+
+
+
+
+#+begin_src haskell :results output :exports both
+vertexCount depG
+edgeCount depG
+#+end_src
+
+#+RESULTS:
+: 14779
+: 105693
+
+** graphics
+
+=text= package dependency example
+
+#+begin_src haskell
+ supers = upstreams "text" depG <> Set.singleton "text"
+ superG = induce (`elem` (toList supers)) depG
+ #+end_src
+
+#+RESULTS:
+
+#+begin_src haskell :file other/textdeps.svg :results output graphics file :exports results
+ baseGraph = defaultGraph & attL NodeType (ID "shape") .~ Just (ID "box") & gattL (ID "rankdir") .~ Just (IDQuoted "BT")
+ g <- processGraph $ toDotGraphWith UnDirected baseGraph (fmap packUTF8 superG)
+ writeChartSvg "other/textdeps.svg" (graphToChart g)
+ #+end_src
+
+ #+RESULTS:
+ [[file:other/textdeps.svg]]
+
+
+=folds=
+
+#+begin_src haskell
+ supers = upstreams "folds" depG <> Set.singleton "folds"
+ superG = induce (`elem` (toList supers)) depG
+ #+end_src
+
+ #+RESULTS:
+ : <interactive>:117:2: warning: [-Wname-shadowing]
+ :     This binding for ‘superG’ shadows the existing binding
+ :       defined at <interactive>:110:2
+
+
+#+begin_src haskell :file other/foldsdeps.svg :results output graphics file :exports results
+ baseGraph = defaultGraph & attL NodeType (ID "shape") .~ Just (ID "box") & gattL (ID "rankdir") .~ Just (IDQuoted "BT")
+ g <- processGraph $ toDotGraphWith UnDirected baseGraph (fmap packUTF8 superG)
+ writeChartSvg "other/foldsdeps.svg" (graphToChart g)
+ #+end_src
+
+ #+RESULTS:
+ [[file:other/foldsdeps.svg]]
+
+
+=mealy= package dependencies
+
+#+begin_src haskell
+ supers = upstreams "mealy" depG <> Set.singleton "mealy"
+ superG = induce (`elem` (toList (Set.delete "base" supers))) depG
+ #+end_src
+
+#+RESULTS:
+: <interactive>:124:2: warning: [-Wname-shadowing]
+:     This binding for ‘superG’ shadows the existing binding
+:       defined at <interactive>:117:2
+
+#+begin_src haskell :file other/mealy.svg :results output graphics file :exports results
+ g <- processGraph $ toDotGraphWith UnDirected baseGraph (fmap packUTF8 superG)
+ writeChartSvg "other/mealy.svg" (graphToChart g)
+ #+end_src
+
+ #+RESULTS:
+ [[file:other/mealy.svg]]
+
+
 
 * Retrieve test cabals
 

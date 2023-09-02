@@ -6,13 +6,6 @@
 
 ~cabal-fix~ helps fix warts in your cabal files.
 
-* ToDo cabal-fix FIXME
-
-- [ ] comments
-  - [ ] foo comments
-  - [ ] check all comments
-- [ ] create the app
-
 ** app steps
 
 - [ ] parse
