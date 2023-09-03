@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# LANGUAGE OverloadedStrings #-}
@@ -13,9 +12,7 @@ import Data.ByteString.Lazy qualified as BSL
 import Data.ByteString (ByteString)
 import FlatParse.Basic qualified as FP
 import GHC.Generics
-import NumHask.Space
 import Data.List qualified as List
-import Data.Char
 import Data.Bool
 import Data.String
 import Data.Map.Strict qualified as Map
@@ -25,6 +22,7 @@ import Data.Bifunctor
 import Data.Either
 import Data.Maybe
 import CabalFix
+import Distribution.Version
 
 cabalIndex :: IO FilePath
 cabalIndex = do
@@ -84,6 +82,9 @@ latestCabals = do
   pure $ Map.fromListWith (\v v' -> bool v' v (fst v > fst v')) $ (\(fn,bs) -> (nameFN fn, (getVersion fn, bs))) <$> cs
   where
     getVersion = runP versionP . versionFN
+
+versionP = undefined
+
 
 latestValidFields :: IO (Map.Map ByteString (Version, [Field Position]))
 latestValidFields = do

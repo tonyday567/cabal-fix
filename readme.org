@@ -5,9 +5,14 @@
 
 ~cabal-fix~ helps fix warts in your cabal files.
 
-* Next cabal-fix tar
+* ToDo cabal-fix tar
+:LOGBOOK:
+CLOCK: [2023-09-03 Sun 14:18]
+:END:
 
-- [ ] transfer research-hackage functionality over here
+- [ ] move to cabals version
+- [ ] parsing versions
+
 - [ ] reproduce r&d there
 - [ ] explore dependency ranges
 
@@ -373,14 +378,14 @@ take 2 $ Map.toList $ Map.filter (/="") $ fmap (mconcat . mconcat . rawBuildDeps
 #+end_src
 
 #+RESULTS:
-: [("AppleScript",""),("BiGUL","")]
+: [("CV","base >= 4 && < 6,parallel > 3.1,array >= 0.2.0.0,directory >= 1 && < 2,mtl >= 1.1.0,carray >= 0.1.5,QuickCheck >= 2.1,containers >= 0.2,storable-complex,binary >= 0.5,deepseq >= 1.1,bindings-DSL >= 1.0.14 && < 1.1,vector >= 0.7.0.1 && < 1.1,lazysmallcheck >= 0.5 && < 1,parallel-io    >= 0.3.2 && < 0.3.3,storable-tuple >= 0.0.2 && <= 1,mwc-random >= 0.12.0.0,primitive  >= 0.4.1, filepath >= 1.3.0.0 && < 1.4"),("Cabal","Cabal-syntax ^>= 3.10,array      >= 0.4.0.1  && < 0.6,base       >= 4.9      && < 5,bytestring >= 0.10.0.0 && < 0.12,containers >= 0.5.0.0  && < 0.7,deepseq    >= 1.3.0.1  && < 1.5,directory  >= 1.2      && < 1.4,filepath   >= 1.3.0.1  && < 1.5,pretty     >= 1.1.1    && < 1.2,process    >= 1.2.1.0  && < 1.7,time       >= 1.4.0.1  && < 1.13transformers (>= 0.3      && < 0.4) || (>=0.4.1.0 && <0.7),mtl           >= 2.1      && < 2.4,text         (>= 1.2.3.0  && < 1.3) || (>= 2.0 && < 2.1),parsec        >= 3.1.13.0 && < 3.2")]
 
 #+begin_src haskell :results output
-FP.runParser depNameP "base < 5 && >= 3,linear,newtype"
+FP.runParser depPs' "base >= 4 && < 6,parallel > 3.1,array >= 0.2.0.0,directory >= 1 && < 2,mtl >= 1.1.0,carray >= 0.1.5,QuickCheck >= 2.1,containers >= 0.2,storable-complex,binary >= 0.5,deepseq >= 1.1,bindings-DSL >= 1.0.14 && < 1.1,vector >= 0.7.0.1 && < 1.1,lazysmallcheck >= 0.5 && < 1,parallel-io    >= 0.3.2 && < 0.3.3,storable-tuple >= 0.0.2 && <= 1,mwc-random >= 0.12.0.0,primitive  >= 0.4.1, filepath >= 1.3.0.0 && < 1.4"
 #+end_src
 
 #+RESULTS:
-: OK "base" "< 5 && >= 3,linear,newtype"
+: OK [Dep' {dep' = "base", depRange' = Just (Left (DepRange "4" "6"))},Dep' {dep' = "parallel", depRange' = Just (Right "> 3.1")},Dep' {dep' = "array", depRange' = Just (Left (DepLower "0.2.0.0"))},Dep' {dep' = "directory", depRange' = Just (Left (DepRange "1" "2"))},Dep' {dep' = "mtl", depRange' = Just (Left (DepLower "1.1.0"))},Dep' {dep' = "carray", depRange' = Just (Left (DepLower "0.1.5"))},Dep' {dep' = "QuickCheck", depRange' = Just (Left (DepLower "2.1"))},Dep' {dep' = "containers", depRange' = Just (Left (DepLower "0.2"))},Dep' {dep' = "storable-complex", depRange' = Just (Right "")},Dep' {dep' = "binary", depRange' = Just (Left (DepLower "0.5"))},Dep' {dep' = "deepseq", depRange' = Just (Left (DepLower "1.1"))},Dep' {dep' = "bindings-DSL", depRange' = Just (Left (DepRange "1.0.14" "1.1"))},Dep' {dep' = "vector", depRange' = Just (Left (DepRange "0.7.0.1" "1.1"))},Dep' {dep' = "lazysmallcheck", depRange' = Just (Left (DepRange "0.5" "1"))},Dep' {dep' = "parallel-io", depRange' = Just (Left (DepRange "0.3.2" "0.3.3"))},Dep' {dep' = "storable-tuple", depRange' = Just (Left (DepLower "0.0.2"))}] "&& <= 1,mwc-random >= 0.12.0.0,primitive  >= 0.4.1, filepath >= 1.3.0.0 && < 1.4"
 
 
 #+begin_src haskell :results output
@@ -522,7 +527,7 @@ sum $ fmap snd $ Map.toList $ fmap length vdeps
 : > 14779
 : 106238
 
-*** ToDo potential error sources
+*** potential error sources
 
 - [X] error 1 - commas can be inside braces
 

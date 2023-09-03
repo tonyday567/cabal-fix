@@ -7,6 +7,7 @@
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-unused-imports #-}
+{-# OPTIONS_GHC -Wno-unused-matches #-}
 
 module CabalFix
   ( getCabal,
@@ -100,6 +101,11 @@ module CabalFix
     lte,
     gt,
     gte,
+    caret,
+    amps,
+    versionChar,
+    version,
+    preferredDepsBS,
   )
 where
 
@@ -127,6 +133,7 @@ import Distribution.Fields
 import Distribution.Fields.Field hiding (fieldUniverse)
 import Distribution.Parsec.Position
 import Distribution.Pretty
+import Distribution.Version
 import Distribution.Utils.Generic
 import FlatParse.Basic (Parser)
 import FlatParse.Basic qualified as FP
@@ -904,22 +911,13 @@ packageChar =
 validName :: Parser e String
 validName = (:) <$> initialPackageChar <*> FP.many packageChar
 
-data Dep = Dep {dep :: ByteString, depRange :: Maybe DepRange} deriving (Show, Ord, Eq, Generic)
+data Dep = Dep {dep :: ByteString, depRange :: VersionRange} deriving (Show, Ord, Eq, Generic)
 
-data DepBound = DepEq | DepCaret | DepStar | DepLTE | DepLT | DepGTE | DepGT deriving (Eq, Show)
-
-data DepConnector = DepAnd | DepOr deriving (Eq, Show)
-
-data DepSet = DepSet [Either (DepBound, Version) DepConnector] deriving (Show, Eq, Ord, Generic)
-
-printDepRange :: DepRange -> ByteString
-printDepRange (DepCaret v) = "^>=" <> v
-printDepRange (DepLower v) = ">=" <> v
-printDepRange (DepUpper v) = "<" <> v
-printDepRange (DepRange l u) = ">=" <> l <> " && " <> "<" <> u
+printDepRange :: VersionRange -> ByteString
+printDepRange = undefined
 
 printDep :: Int -> Dep -> ByteString
-printDep n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> maybeToList (printDepRange <$> r))
+printDep n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> [printDepRange r])
 
 data DepAlignment = DepAligned | DepUnaligned deriving (Eq, Show)
 
@@ -931,9 +929,8 @@ printDeps DepAligned ds = zipWith printDep ns ds
     ns = (\x -> maximum ls - x + 1) <$> ls
 
 printDepPreferred :: ByteString -> Int -> Dep -> ByteString
-printDepPreferred libd n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> r')
-  where
-    r' = bool (maybe (maybeToList $ printDepRange <$> r) (: []) (Map.lookup d (Map.fromList preferredDepsBS))) [] (libd == d)
+printDepPreferred libd n (Dep d r) = undefined -- C.intercalate (C.pack $ replicate n ' ') ([d] <> r')
+    -- r' = bool (printDepRange <$> r) (: []) (Map.lookup d (Map.fromList preferredDepsBS)) [] (libd == d)
 
 printDepsPreferred :: ByteString -> DepAlignment -> [Dep] -> [ByteString]
 printDepsPreferred libd DepUnaligned ds = printDepPreferred libd 1 <$> ds
@@ -947,10 +944,10 @@ depP =
   Dep
     <$> ( FP.optional prefixComma
             *> ws
-            *> (FP.byteStringOf validName)
+            *> FP.byteStringOf validName
             <* ws
         )
-    <*> FP.optional depRangeP
+    <*> depRangeP
     <* FP.optional postfixComma
 
 depP' :: Parser e Dep'
@@ -958,7 +955,7 @@ depP' =
   Dep'
     <$> (
             ws
-            *> (FP.byteStringOf validName)
+            *> FP.byteStringOf validName
             <* ws
         )
     <*> FP.optional ((Left <$> depRangeP) FP.<|> (Right <$> nota ','))
@@ -974,7 +971,7 @@ intercalated :: FP.Parser e item -> FP.Parser e sep -> FP.Parser e [item]
 intercalated item sep =
   (:) <$> item <*> FP.chainr (:) (sep *> item) (pure [])
 
-data Dep' = Dep' {dep' :: ByteString, depRange' :: Maybe (Either DepRange ByteString)} deriving (Show, Ord, Eq, Generic)
+data Dep' = Dep' {dep' :: ByteString, depRange' :: Maybe (Either VersionRange ByteString)} deriving (Show, Ord, Eq, Generic)
 
 depOtherP :: Parser e (ByteString, ByteString)
 depOtherP =
@@ -997,8 +994,10 @@ nota c = FP.withSpan (FP.skipMany (FP.satisfy (/= c))) (\() s -> FP.unsafeSpanTo
 untilP :: Char -> FP.Parser e ByteString
 untilP c = nota c <* FP.satisfy (==c)
 
-depRangeP :: Parser e DepRange
+depRangeP :: Parser e VersionRange
 depRangeP =
+  undefined
+{-
   ws
     *> ( (DepCaret <$> (caret *> ws *> version))
            FP.<|> ( DepRange
@@ -1011,6 +1010,7 @@ depRangeP =
            FP.<|> (DepLower <$> (gte *> ws *> version))
        )
     <* ws
+-}
 
 prefixComma :: Parser e ()
 prefixComma = $(FP.string ", ")
@@ -1022,7 +1022,7 @@ space :: Parser e ()
 space = $(FP.string " ")
 
 ws :: Parser e ()
-ws = pure () <* FP.many space
+ws = () <$ FP.many space
 
 caret :: Parser e ()
 caret = $(FP.string "^>=")
