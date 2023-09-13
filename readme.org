@@ -7,7 +7,7 @@
 
 * ToDo cabal-fix tar
 :LOGBOOK:
-CLOCK: [2023-09-03 Sun 14:18]
+CLOCK: [2023-09-03 Sun 14:18]--[2023-09-03 Sun 14:41] =>  0:23
 :END:
 
 - [ ] move to cabals version
