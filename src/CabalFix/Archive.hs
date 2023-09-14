@@ -14,15 +14,15 @@ import FlatParse.Basic qualified as FP
 import GHC.Generics
 import Data.List qualified as List
 import Data.Bool
-import Data.String
 import Data.Map.Strict qualified as Map
 import Distribution.Fields
-import Distribution.Parsec.Position (Position)
 import Data.Bifunctor
 import Data.Either
 import Data.Maybe
 import CabalFix
 import Distribution.Version
+import Distribution.Parsec
+import CabalFix.FlatParse
 
 cabalIndex :: IO FilePath
 cabalIndex = do
@@ -42,49 +42,23 @@ isNormalFile _ = False
 data FileName = FileName { nameFN :: ByteString, versionFN :: ByteString, filenameFN :: ByteString } deriving (Generic, Eq, Ord, Show)
 
 filename :: ByteString -> FileName
-filename = runP filenameP
+filename = runParser_ filenameP
 
 filenameP :: FP.Parser e FileName
 filenameP = FileName <$> untilP '/' <*> untilP '/' <*> FP.takeRest
-
-runP :: FP.Parser e a -> ByteString -> a
-runP p bs = case FP.runParser p bs of
-  FP.OK res _ -> res
-  _ -> error "parse error"
-
--- | run a Parser, throwing away leftovers. Returns Left on 'Fail' or 'Err'.
---
--- >>> runParserEither ws " x"
--- Right ' '
-runParserEither :: (IsString e) => FP.Parser e a -> ByteString -> Either e a
-runParserEither p bs = case FP.runParser p bs of
-  FP.Err e -> Left e
-  FP.OK a _ -> Right a
-  FP.Fail -> Left "uncaught parse error"
-
-runParserEither' :: FP.Parser ByteString a -> ByteString -> Either ByteString a
-runParserEither' p bs = case FP.runParser p bs of
-  FP.Err e -> Left e
-  FP.OK a "" -> Right a
-  FP.OK _ l -> Left ("leftovers: " <> l)
-  FP.Fail -> Left "uncaught parse error"
-
 
 -- | cabal files
 cabals :: IO [ (FileName, ByteString) ]
 cabals = do
   es <- cabalEntries
-  pure $ first (runP filenameP . FP.strToUtf8) <$> filter ((/= "package.json") . filenameFN . runP filenameP . FP.strToUtf8 . fst) (filter (not . List.isSuffixOf "preferred-versions" . fst) $ [(fp,BSL.toStrict bs) | (fp, Tar.NormalFile bs _) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es])
+  pure $ first (runParser_ filenameP . FP.strToUtf8) <$> filter ((/= "package.json") . filenameFN . runParser_ filenameP . FP.strToUtf8 . fst) (filter (not . List.isSuffixOf "preferred-versions" . fst) $ [(fp,BSL.toStrict bs) | (fp, Tar.NormalFile bs _) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es])
 
 latestCabals :: IO (Map.Map ByteString (Version, ByteString))
 latestCabals = do
   cs <- CabalFix.Archive.cabals
   pure $ Map.fromListWith (\v v' -> bool v' v (fst v > fst v')) $ (\(fn,bs) -> (nameFN fn, (getVersion fn, bs))) <$> cs
   where
-    getVersion = runP versionP . versionFN
-
-versionP = undefined
-
+    getVersion = fromMaybe undefined . simpleParsecBS . versionFN
 
 latestValidFields :: IO (Map.Map ByteString (Version, [Field Position]))
 latestValidFields = do
