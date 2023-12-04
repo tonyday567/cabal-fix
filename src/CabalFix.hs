@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# OPTIONS_GHC -Wno-x-partial #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
@@ -13,7 +14,6 @@ module CabalFix
     putCabal,
     rerenderFile,
     getCabals,
-    catList,
     filterChangedEdit,
     RenderConfig (..),
     defaultRenderConfig,
@@ -21,7 +21,6 @@ module CabalFix
     getTestCabals,
     toContents,
     toFields,
-    licenseFile,
     cabals,
     isSection,
     name,
@@ -37,7 +36,6 @@ module CabalFix
     rawBuildDeps,
     count_,
     collect_,
-    yearList,
     printFields,
     descriptionPreserveNewlines,
     showFields'',
@@ -67,7 +65,6 @@ module CabalFix
     printDeps,
     printDep,
     printDepRange,
-    fieldOrdering,
     sortInnerFields,
     attachComments,
     unComments,
@@ -129,10 +126,12 @@ data RenderConfig = RenderConfig
     freeTexts :: [ByteString],
     -- fields that should be removed
     removals :: [ByteString],
+    preferredDeps :: [(ByteString, ByteString)],
     overwrites :: [(ByteString, ByteString, AddPolicy)],
     fixCommas :: [(ByteString, CommaStyle)],
     sortFieldLines :: [ByteString],
     sortFields :: Bool,
+    fieldOrdering :: [(ByteString, Double)],
     fixBuildDeps :: Bool,
     depAlignment :: DepAlignment,
     removeBlankFields :: Bool,
@@ -140,25 +139,23 @@ data RenderConfig = RenderConfig
     sectionMargin :: Margin,
     commentMargin :: Margin,
     narrowN :: Int,
-    indentN :: Int,
-    replaceCategory :: Bool,
-    replaceCopyright :: Bool
+    indentN :: Int
   }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Read)
 
 defaultRenderConfig :: RenderConfig
 defaultRenderConfig =
   RenderConfig
     ["description"]
     []
-    [ ("license", "BSD-3-Clause", AddReplace),
-      ("license-file", "LICENSE", AddReplace)
-    ]
+    preferredDepsBS
+    []
     [ ("extra-doc-files", NoCommas),
       ("build-depends", PrefixCommas)
     ]
     defaultFieldLineSorts
     True
+    defaultFieldOrdering
     True
     DepAligned
     True
@@ -167,53 +164,17 @@ defaultRenderConfig =
     NoMargin
     60
     4
-    False
-    False
 
-data CommaStyle = PrefixCommas | PostfixCommas | FreeformCommas | NoCommas deriving (Eq, Show)
+data CommaStyle = PrefixCommas | PostfixCommas | FreeformCommas | NoCommas deriving (Eq, Show, Read)
 
 data AddPolicy
   = AddReplace
   | AddAppend
   | AddIfNotExisting
-  deriving (Eq, Show)
+  deriving (Eq, Show, Read)
 
-fieldOrdering :: Map.Map ByteString Double
-fieldOrdering =
-  Map.fromList
-    [ ("author", 6),
-      ("bug-reports", 7.6),
-      ("build-depends", 3),
-      ("build-type", 8),
-      ("cabal-version", 0),
-      ("category", 5.5),
-      ("copyright", 5.2),
-      ("default-extensions", 6),
-      ("default-language", 1),
-      ("description", 7.8),
-      ("exposed-modules", 4),
-      ("extra-doc-files", 9),
-      ("ghc-options", 7),
-      ("homepage", 7.5),
-      ("hs-source-dirs", 2),
-      ("import", 0),
-      ("license", 4),
-      ("license-file", 5),
-      ("location", 12),
-      ("main-is", 0.5),
-      ("maintainer", 7),
-      ("name", 1),
-      ("other-modules", 5),
-      ("synopsis", 7.7),
-      ("tested-with", 8.5),
-      ("type", 11),
-      ("version", 2),
-      ("source-repository", 10),
-      ("common", 11),
-      ("library", 12),
-      ("executable", 13),
-      ("test-suite", 14)
-    ]
+defaultFieldOrdering :: [(ByteString, Double)]
+defaultFieldOrdering = [("cabal-version",0),("import",1),("main-is",2),("default-language",3),("name",4),("hs-source-dirs",5),("version",6),("build-depends",7),("exposed-modules",8),("license",9),("license-file",10),("other-modules",11),("copyright",12),("category",13),("author",14),("default-extensions",15),("ghc-options",16),("maintainer",17),("homepage",18),("bug-reports",19),("synopsis",20),("description",21),("build-type",22),("tested-with",23),("extra-doc-files",24),("source-repository",25),("type",26),("common",27),("location",28),("library",29),("executable",30),("test-suite",31)]
 
 defaultFieldLineSorts :: [ByteString]
 defaultFieldLineSorts =
@@ -226,47 +187,7 @@ defaultFieldLineSorts =
   ]
 
 preferredDepsBS :: [(ByteString, ByteString)]
-preferredDepsBS =
-  [ ("adjunctions", ">=4.0 && <5"),
-    ("algebraic-graphs", ">=0.6 && <0.8"),
-    ("base", ">=4.7 && <5"),
-    ("bifunctors", ">=5.5.11 && <5.7"),
-    ("box", ">=0.9 && <0.10"),
-    ("box-socket", ">=0.4 && <0.5"),
-    ("bytestring", ">=0.11.3 && <0.13"),
-    ("chart-svg", ">=0.5 && <0.6"),
-    ("containers", ">=0.6 && <0.7"),
-    ("distributive", ">=0.4 && <0.7"),
-    ("flatparse", ">=0.3.5 && <0.6"),
-    ("formatn", ">=0.2.1 && <0.4"),
-    ("mealy", ">=0.4 && <0.5"),
-    ("mtl", ">=2.2.2 && <2.4"),
-    ("numhask", ">=0.10 && <0.12"),
-    ("numhask-array", ">=0.10 && <0.12"),
-    ("numhask-space", ">=0.10 && <0.12"),
-    ("optics-core", ">=0.4 && <0.5"),
-    ("optics-extra", ">=0.4 && <0.5"),
-    ("optparse-applicative", ">=0.17 && <0.19"),
-    ("perf", ">=0.12 && <0.13"),
-    ("pretty", ">=1.1.3 && <1.1.4"),
-    ("profunctors", ">=5.6.2 && <5.7"),
-    ("random", ">=1.2 && <1.3"),
-    ("rdtsc", ">=1.3 && <1.4"),
-    ("semigroupoids", ">=5.3 && <6.1"),
-    ("string-interpolate", ">=0.3 && <0.4"),
-    ("tasty", ">=1.2 && <1.6"),
-    ("tasty-golden", ">=2.3.1.1 && <2.4"),
-    ("tdigest", ">=0.2.1 && <0.4"),
-    ("template-haskell", ">=2.16 && <2.21"),
-    ("text", ">=1.2 && <2.2"),
-    ("these", ">=1.1 && <1.3"),
-    ("time", ">=1.9 && <1.13"),
-    ("tree-diff", ">=0.3 && <0.4"),
-    ("unordered-containers", ">=0.2 && <0.3"),
-    ("vector", ">=0.12.3 && <0.14"),
-    ("vector-algorithms", ">=0.8.0 && <0.10"),
-    ("web-rep", ">=0.11 && <0.12")
-  ]
+preferredDepsBS = [("base", ">=4.7 && <5")]
 
 renderCabal :: RenderConfig -> [Field Position] -> String
 renderCabal rcfg = showFields'' rcfg (const (CommentAfter [])) (const id) 2 . printFields
@@ -278,11 +199,9 @@ rerenderCabal rcfg bs = (C.pack . showFields'' rcfg fComment (const id) (indentN
     -- position info is now gone
     (Field (Name _ _) (FieldLine _ libdep : _)) = head $ filter (hasName ["name"]) fs
     fs' =
-      defaultSortFields $
+      defaultSortFields rcfg $
         fmap (sortFieldLinesFor (sortFieldLines rcfg)) $
           bool id (fmap (fixBuildDeps' rcfg libdep)) (fixBuildDeps rcfg) $
-            bool id (replaceCategory' libdep) (replaceCategory rcfg) $
-              bool id (replaceCopyright' libdep) (replaceCopyright rcfg) $
                 adds rcfg $
                   fmap (fixcommas' rcfg) $
                     bool id (filter (not . isBlankField)) (removeBlankFields rcfg) $
@@ -307,20 +226,6 @@ fixBDLines libdep align fls = fls'
     deps = parseDepFL <$> fls
     pds = (", " <>) <$> printDepsPreferred libdep align deps
     fls' = zipWith setValueFL fls pds
-
-replaceCategory' :: ByteString -> [Field [ByteString]] -> [Field [ByteString]]
-replaceCategory' libdep fs = case mv of
-  Nothing -> fs
-  Just v -> addField AddReplace (Field (Name [] "category") [FieldLine [] v]) fs
-  where
-    mv = Map.lookup (C.unpack libdep) (Map.fromList catList)
-
-replaceCopyright' :: ByteString -> [Field [ByteString]] -> [Field [ByteString]]
-replaceCopyright' libdep fs = case mv of
-  Nothing -> fs
-  Just v -> addField AddReplace (Field (Name [] "copyright") [FieldLine [] v]) fs
-  where
-    mv = C.pack . ("Tony Day (c) " <>) . show <$> Map.lookup (C.unpack libdep) (Map.fromList yearList)
 
 parseDepFL :: FieldLine ann -> Dep
 parseDepFL (FieldLine _ fl) = uncurry Dep $ runParser_ depP fl
@@ -470,69 +375,6 @@ count_ = foldl' (\x a -> Map.insertWith (+) a 1 x) Map.empty
 collect_ :: (Ord k) => [(k, v)] -> Map.Map k [v]
 collect_ = foldl' (\x (k, v) -> Map.insertWith (<>) k [v] x) Map.empty
 
--- | BSD3 clause from cabal init
-licenseFile :: String -> String -> String
-licenseFile a y =
-  [i|Copyright (c) #{y}, #{a}
-
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-
-    * Redistributions in binary form must reproduce the above
-      copyright notice, this list of conditions and the following
-      disclaimer in the documentation and/or other materials provided
-      with the distribution.
-
-    * Neither the name of #{a} nor the names of other
-      contributors may be used to endorse or promote products derived
-      from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-|]
-
-yearList :: [(String, Int)]
-yearList = [("numhask", 2016), ("mealy", 2013), ("box", 2017), ("formatn", 2016), ("prettychart", 2023), ("code", 2023), ("poker-fold", 2020), ("numhask-space", 2016), ("iqfeed", 2014), ("box-socket", 2017), ("numhask-array", 2016), ("euler", 2023), ("tonyday567", 2020), ("foo", 2023), ("web-rep", 2015), ("dotparse", 2022), ("perf", 2018), ("anal", 2023), ("research-hackage", 2022), ("chart-svg", 2017), ("ephemeral", 2020)]
-
-catList :: [(String, ByteString)]
-catList =
-  [ ("tonyday567", "web"),
-    ("research-hackage", "project"),
-    ("anal", "project"),
-    ("numhask-array", "math"),
-    ("chart-svg", "graphics"),
-    ("cabal-fix", "distribution"),
-    ("numhask-space", "math"),
-    ("mealy", "algorithm"),
-    ("formatn", "text"),
-    ("prettychart", "graphcs"),
-    ("dotparse", "graphics"),
-    ("perf", "performance"),
-    ("numhask", "math"),
-    ("ephemeral", "machine learning"),
-    ("box-socket", "web"),
-    ("iqfeed", "API"),
-    ("box", "control"),
-    ("code", "project"),
-    ("foo", "project"),
-    ("web-rep", "web"),
-    ("poker-fold", "games")
-  ]
-
 printFields :: [Field ann] -> [PrettyField ann]
 printFields =
   runIdentity
@@ -673,10 +515,10 @@ data Block = Block
     _afterBlock :: Margin,
     _contentsBlock :: [String]
   }
-  deriving (Show, Eq)
+  deriving (Show, Eq, Read)
 
 data Margin = Margin | NoMargin
-  deriving (Eq, Show)
+  deriving (Eq, Show, Read)
 
 -- | Collapse margins, any margin = margin
 instance Semigroup Margin where
@@ -696,7 +538,7 @@ flattenBlocks = go0
           | surr' <> before == Margin = ("" :)
           | otherwise = id
 
-data ValueAlignment = ValueAligned | ValueUnaligned deriving (Eq, Show)
+data ValueAlignment = ValueAligned | ValueUnaligned deriving (Eq, Show, Read)
 
 lines_ :: String -> [String]
 lines_ [] = []
@@ -849,9 +691,12 @@ printDepRange :: VersionRange -> ByteString
 printDepRange vr = C.pack . show . pretty $ vr
 
 printDep :: Int -> Dep -> ByteString
-printDep n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> [normDepRange r])
+printDep n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> rs)
+  where
+    r' = normDepRange r
+    rs = bool [r'] [] (r'=="")
 
-data DepAlignment = DepAligned | DepUnaligned deriving (Eq, Show)
+data DepAlignment = DepAligned | DepUnaligned deriving (Eq, Show, Read)
 
 printDeps :: DepAlignment -> [Dep] -> [ByteString]
 printDeps DepUnaligned ds = printDep 1 <$> ds
@@ -861,9 +706,10 @@ printDeps DepAligned ds = zipWith printDep ns ds
     ns = (\x -> maximum ls - x + 1) <$> ls
 
 printDepPreferred :: ByteString -> Int -> Dep -> ByteString
-printDepPreferred libd n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> r')
+printDepPreferred libd n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> rs)
   where
-    r' = bool (maybe [normDepRange r] (: []) (Map.lookup d (Map.fromList preferredDepsBS))) [] (libd == d)
+    r' = bool (normDepRange r) (fromMaybe (normDepRange r) (Map.lookup d (Map.fromList preferredDepsBS))) (libd == d)
+    rs = bool [r'] [] (r'=="")
 
 printDepsPreferred :: ByteString -> DepAlignment -> [Dep] -> [ByteString]
 printDepsPreferred libd DepUnaligned ds = printDepPreferred libd 1 <$> ds
@@ -872,16 +718,16 @@ printDepsPreferred libd DepAligned ds = zipWith (printDepPreferred libd) ns ds
     ls = BS.length . dep <$> ds
     ns = (\x -> maximum ls - x + 1) <$> ls
 
-defaultSortFields :: [Field ann] -> [Field ann]
-defaultSortFields fs = List.sortOn (\f -> (fromMaybe 100 (Map.lookup (name f) fieldOrdering), name2 f)) (sortInnerFields <$> fs)
+defaultSortFields :: RenderConfig -> [Field ann] -> [Field ann]
+defaultSortFields cfg fs = List.sortOn (\f -> (fromMaybe 100 (Map.lookup (name f) (Map.fromList $ fieldOrdering cfg)), name2 f)) (sortInnerFields cfg <$> fs)
 
 name2 :: Field ann -> Maybe ByteString
 name2 (Field _ fl) = listToMaybe (fieldLineBS <$> fl)
 name2 (Section _ a _) = listToMaybe $ snd . secName <$> a
 
-sortInnerFields :: Field ann -> Field ann
-sortInnerFields f@(Field _ _) = f
-sortInnerFields (Section n a fss) = Section n a (defaultSortFields $ sortInnerFields <$> fss)
+sortInnerFields :: RenderConfig -> Field ann -> Field ann
+sortInnerFields _ f@(Field _ _) = f
+sortInnerFields cfg (Section n a fss) = Section n a (defaultSortFields cfg $ sortInnerFields cfg <$> fss)
 
 sortFieldLinesFor :: [ByteString] -> Field ann -> Field ann
 sortFieldLinesFor ns f@(Field n fl) =

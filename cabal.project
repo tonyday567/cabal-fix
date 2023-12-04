@@ -1,2 +1,13 @@
 packages:
   cabal-fix.cabal
+
+allow-newer:
+  string-interpolate:bytestring,
+  string-interpolate:template-haskell,
+  string-interpolate:text,
+  formatn:text,
+  dotparse:text,
+  dotparse:template-haskell,
+  dotparse:chart-svg,
+  chart-svg:text,
+  box:text,

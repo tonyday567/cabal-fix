@@ -21,7 +21,6 @@
 - [ ] postfix commas -> prefix commas
 - [ ] straighten build-deps
   
-
 * cabal file listing
 
 #+begin_src haskell :results output
@@ -158,7 +157,6 @@ executable foo
 -- at end
 "
 #+end_example
-
 
 
 
