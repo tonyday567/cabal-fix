@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedRecordDot #-}
 
 -- | basic measurement and callibration
 module Main where
@@ -40,11 +41,11 @@ infoFixOptions =
 main :: IO ()
 main = do
   o <- execParser infoFixOptions
-  bool (runRender o) (Text.writeFile (configFile o) (pShowNoColor defaultRenderConfig)) (genConfigFile o)
+  bool (runRender o) (Text.writeFile (o.configFile) (pShowNoColor defaultRenderConfig)) (genConfigFile o)
 
   where
     runRender o = do
-      cfg <- read <$> readFile (configFile o)
+      cfg <- read <$> readFile (o.configFile)
       let inplace = fixInplace o
       d <- getCurrentDirectory
       let fp = takeBaseName d <> ".cabal"

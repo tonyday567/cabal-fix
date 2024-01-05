@@ -119,7 +119,6 @@ library
     exposed-modules:
         CabalFix
         CabalFix.Archive
-        CabalFix.Bespoke
         CabalFix.FlatParse
 
 executable cabal-fix
