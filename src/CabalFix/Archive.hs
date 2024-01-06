@@ -19,7 +19,7 @@ import Distribution.Fields
 import Data.Bifunctor
 import Data.Either
 import Data.Maybe
-import CabalFix
+import CabalFix ( sec )
 import Distribution.Version
 import Distribution.Parsec
 import CabalFix.FlatParse
