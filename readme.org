@@ -7,7 +7,7 @@
 
 ~cabal-fix~:
 
-- Contains an app which parses your existing cabal file, re-renders it according to some config, then either displays a diff, or overwrites the filke. It will trash your prior formatting notions.
+- Contains an app which parses your existing cabal file, re-renders it according to some config, then either displays a diff, or addFields the filke. It will trash your prior formatting notions.
 - Is an idempotent parser of a cabal file or ByteString.
 - Is an inexact printer.
 - Contains code to explore the cabal index archive at the base of your cabal installation.
@@ -46,14 +46,14 @@ pPrint defaultConfig
 #+begin_example
 Config
     { freeTexts = [ "description" ]
-    , removals = []
+    , fieldRemovals = []
     , preferredDeps =
         [
             ( "base"
             , ">=4.7 && <5"
             )
         ]
-    , overwrites = []
+    , addFields = []
     , fixCommas =
         [
             ( "extra-doc-files"
@@ -214,7 +214,251 @@ Config
     }
 #+end_example
 
-* Archive exploration
+* Imports
+#+begin_src haskell-ng :results output
+:r
+:set -Wno-type-defaults
+:set -Wno-name-shadowing
+:set -XOverloadedStrings
+import Data.Char
+import CabalFix
+import CabalFix.Archive
+import qualified Codec.Archive.Tar as Tar
+import System.Directory
+import Control.Monad
+import Data.List qualified as List
+import Data.Function
+import Box
+import Data.Bifunctor
+import Data.ByteString (ByteString)
+import Data.ByteString qualified as BS
+import Data.ByteString.Lazy qualified as BSL
+import Data.ByteString.Char8 qualified as C
+import FlatParse.Basic qualified as FP
+import NumHask.Space
+import Data.Map.Strict qualified as Map
+import Data.Ord
+import Data.Either
+import Algebra.Graph
+import qualified Algebra.Graph.ToGraph as ToGraph
+import DotParse
+import Chart
+import Data.Set qualified as Set
+import Text.Pretty.Simple
+#+end_src
+
+* cabal init
+
+
+** minimal
+
+A minimal =cabal init=
+
+#+begin_src sh :results output
+mkdir minimal && cd minimal && cabal init --minimal --simple --overwrite --lib --tests --language=GHC2021 --license=BSD-2-Clause  -p minimal
+#+end_src
+
+#+RESULTS:
+#+begin_example
+[Log] Using cabal specification: 3.0
+[Log] Creating fresh file LICENSE...
+[Log] Creating fresh file CHANGELOG.md...
+[Log] Creating fresh directory ./src...
+[Log] Creating fresh file src/MyLib.hs...
+[Log] Creating fresh directory ./test...
+[Log] Creating fresh file test/Main.hs...
+[Log] Creating fresh file minimal.cabal...
+[Warning] No synopsis given. You should edit the .cabal file and add one.
+[Info] You may want to edit the .cabal file and add a Description field.
+#+end_example
+
+#+begin_src sh :results output
+cabal-fix check -d "minimal" -c "other/init.config"
+#+end_src
+
+#+RESULTS:
+: Right (Just BS.concat
+:   [
+:     -"    default-language: GHC2021\n",
+:     -"    type:             exitcode-stdio-1.0\n",
+:     -"    hs-source-dirs:   test\n",
+:     +"    hs-source-dirs:   test\n",
+:     +"    default-language: GHC2021\n",
+:     +"    type:             exitcode-stdio-1.0\n"])
+
+Using library:
+
+#+begin_src haskell-ng :results output
+:set -XOverloadedStrings
+:set -XOverloadedLabels
+:set -Wno-incomplete-uni-patterns
+:set -Wno-name-shadowing
+import CabalFix
+import Text.Pretty.Simple
+bs <- BS.readFile "minimal/minimal.cabal"
+cfg <- read <$> readFile "other/init.config" :: IO Config
+(Just cf) = preview (cabalFields' cfg) bs
+cf' = fixCabalFields cfg cf
+bs' = review (cabalFields' cfg) cf'
+BS.writeFile "other/old.cabal" bs
+BS.writeFile "other/new.cabal" bs'
+#+end_src
+
+#+RESULTS:
+
+** Trailing debug
+
+#+begin_src haskell-ng :results output
+bds = filter (not . null) $ toListOf (#fields % fieldList % each % subfield' "build-depends") cf
+bds
+fixBDLines cfg "minimal" . mconcat . fmap (view fieldLines') <$> bds
+fmap (fixBuildDeps cfg "minimal") <$> bds
+#+end_src
+
+#+RESULTS:
+: [[Field (Name [] "build-depends") [FieldLine [] "base ^>=4.17.2.1"]],[Field (Name [] "build-depends") [FieldLine [] "base ^>=4.17.2.1,",FieldLine [] "minimal"]]]
+: [[FieldLine [] "base >=4.7 && <5"],[FieldLine [] "base    >=4.7 && <5,",FieldLine [] "minimal"]]
+: [[Field (Name [] "build-depends") [FieldLine [] "base >=4.7 && <5"]],[Field (Name [] "build-depends") [FieldLine [] "base    >=4.7 && <5,",FieldLine [] "minimal"]]]
+
+#+begin_src haskell-ng :results output
+toListOf (subfield' "build-depends") <$> (cf & view (#fields % fieldList) & bool id (fmap (fixBuildDeps cfg (pname cf))) (doFixBuildDeps cfg))
+toListOf (subfield' "build-depends") <$> (fixCabalFields cfg cf & view (#fields % fieldList))
+#+end_src
+
+#+RESULTS:
+: [[[]],[[]],[[]],[[]],[[]],[[]],[[]],[[]],[[Field (Name [] "build-depends") [FieldLine [] "base ^>=4.17.2.1"]]],[[Field (Name [] "build-depends") [FieldLine [] "base ^>=4.17.2.1,",FieldLine [] "minimal"]]]]
+: [[[]],[[]],[[]],[[]],[[]],[[]],[[]],[[]],[[Field (Name [] "build-depends") [FieldLine [] "base ^>=4.17.2.1"]]],[[Field (Name [] "build-depends") [FieldLine [] "base ^>=4.17.2.1,",FieldLine [] "minimal"]]]]
+
+** Patch
+
+the prism laws:
+
+#+begin_src haskell-ng :results output
+:set -XOverloadedStrings
+:set -XOverloadedLabels
+:set -Wno-incomplete-uni-patterns
+:set -Wno-name-shadowing
+import CabalFix
+import Text.Pretty.Simple
+bs <- BS.readFile "minimal/minimal.cabal"
+cfg <- read <$> readFile "other/init.config" :: IO Config
+-- cfg = defaultConfig
+(Just cf) = preview (cabalFields' cfg) bs
+bs' = review (cabalFields' cfg) cf
+(Just cf') = preview (cabalFields' cfg) bs'
+cfFixed = fixCabalFields cfg cf
+bsFixed = review (cabalFields' cfg) cfFixed
+#+end_src
+
+#+begin_src haskell-ng :results output
+import MarkupParse.Patch
+import Data.TreeDiff
+:set -Wno-type-defaults
+fmap ansiWlEditExpr $ patch (C.lines bs) (C.lines bsFixed)
+#+end_src
+
+#+RESULTS:
+: Just [
+:   -"    default-language: GHC2021",
+:   -"    type:             exitcode-stdio-1.0",
+:   -"    hs-source-dirs:   test",
+:   +"    hs-source-dirs:   test",
+:   +"    default-language: GHC2021",
+:   +"    type:             exitcode-stdio-1.0"]
+
+** printDepsPreferred deconstruction
+
+#+begin_src haskell-ng :results output
+:set -XOverloadedStrings
+:set -XOverloadedLabels
+:set -Wno-incomplete-uni-patterns
+:set -Wno-name-shadowing
+import CabalFix
+import Text.Pretty.Simple
+bs <- getCabalFile "xyzzy/xyzzy.cabal"
+cfg = defaultConfig
+bs' = cabalFix cfg bs
+(fs, extras) = toFields (freeTexts cfg) bs
+(Field (Name _ _) (FieldLine _ libdep : _)) = head $ filter (hasName ["name"]) fs
+libdep
+fls = mconcat $ fieldNameLinesView "build-depends" <$> fs
+printDepsPreferred cfg "xyzzy" DepUnaligned $ parseDepFL <$> fls
+ds = parseDepFL <$> fls
+head ds
+printDepPreferred cfg "xyzzy" 1 $ head ds
+#+end_src
+
+#+RESULTS:
+: "xyzzy"
+: ["base >=4.7 && <5","base >=4.7 && <5","xyzzy","base >=4.7 && <5","xyzzy"]
+: Dep {dep = "base", depRange = "^>=4.17.2.1"}
+: "base >=4.7 && <5"
+
+** cabalFix deconstruction
+
+#+begin_src haskell-ng :results output
+:set -XOverloadedStrings
+:set -XOverloadedLabels
+:set -Wno-incomplete-uni-patterns
+:set -Wno-name-shadowing
+import CabalFix
+import Text.Pretty.Simple
+cfg <- read <$> readFile "xyzzy/cabal-fix.config" :: IO Config
+bs <- getCabalFile "xyzzy/xyzzy.cabal"
+(fs, extras) = toFields (freeTexts cfg) bs
+(Field (Name _ _) (FieldLine _ libdep : _)) = head $ filter (hasName ["name"]) fs
+libdep
+#+end_src
+
+#+RESULTS:
+: "xyzzy"
+
+#+begin_src haskell-ng :results output
+fs'' = fmap (fixesCommas cfg) $ bool id (filter (not . isBlankField)) (removeBlankFields cfg) $ filter (not . hasName (fieldRemovals cfg)) fs
+fs''' = addsFields cfg fs''
+fs4 = fs''' !! 9
+-- fs4
+fixBuildDeps cfg "xyzzy" fs4
+-- fs4 = bool id (fmap (fixBuildDeps cfg libdep)) (fixBuildDeps cfg) fs'''
+-- pPrint (fs''' !! 9)
+-- pPrint (fs4 !! 9)
+#+end_src
+
+#+RESULTS:
+: Section (Name [] "executable") [SecArgName [] "xyzzy"] [Field (Name ["-- Import common warning flags."] "import") [FieldLine [] "warnings"],Field (Name ["-- .hs or .lhs file containing the Main module."] "main-is") [FieldLine [] "Main.hs"],Field (Name ["-- Modules included in this executable, other than Main.","-- other-modules:","","-- LANGUAGE extensions used by modules in this package.","-- other-extensions:","","-- Other library packages from which modules are imported."] "build-depends") [FieldLine [] "base  ^>=4.17.2.1,",FieldLine [] "xyzzy,"],Field (Name ["-- Directories containing source files."] "hs-source-dirs") [FieldLine [] "app"],Field (Name ["-- Base language which the package is written in."] "default-language") [FieldLine [] "GHC2021"]]
+
+** comma debug
+
+#+begin_src haskell-ng :results output
+:set -Wno-name-shadowing
+bs <- BS.readFile "xyzzy/xyzzy.cabal"
+(fs, extras) = toFields (freeTexts cfg) bs
+#+end_src
+
+#+begin_src haskell-ng :results output
+import Optics.Extra
+:set -XOverloadedLabels
+:set -XOverloadedStrings
+fixesCommas cfg (fs !! 9)
+-- :t (set #fixCommas [("build-depends", PostfixCommas)])
+-- view #fixCommas defaultConfig
+#+end_src
+
+#+RESULTS:
+: Section (Name [] "executable") [SecArgName [] "xyzzy"] [Field (Name ["-- Import common warning flags."] "import") [FieldLine [] "warnings"],Field (Name ["-- .hs or .lhs file containing the Main module."] "main-is") [FieldLine [] "Main.hs"],Field (Name ["-- Modules included in this executable, other than Main.","-- other-modules:","","-- LANGUAGE extensions used by modules in this package.","-- other-extensions:","","-- Other library packages from which modules are imported."] "build-depends") [FieldLine [] "base ^>=4.17.2.1,",FieldLine [] "xyzzy,"],Field (Name ["-- Directories containing source files."] "hs-source-dirs") [FieldLine [] "app"],Field (Name ["-- Base language which the package is written in."] "default-language") [FieldLine [] "GHC2021"]]
+
+** extractComments
+
+#+begin_src haskell-ng :results output
+-- isSpace8 w = w == 9 || w == 32
+-- take 30 $ (map (BS.dropWhile isSpace8) . C.lines) bs
+extractComments bs
+#+end_src
+
+#+RESULTS:
+: [(2,Comments ["-- The cabal-version field refers to the version of the .cabal specification,","-- and can be different from the cabal-install (the tool) version and the","-- Cabal (the library) version you are using. As such, the Cabal (the library)","-- version used must be equal or greater than the version stated in this field.","-- Starting from the specification version 2.2, the cabal-version field must be","-- the first thing in the cabal file.","","-- Initial package description 'xyzzy' generated by","-- 'cabal init'. For further documentation, see:","--   http://haskell.org/cabal/users-guide/","--","-- The name of the package."]),(16,Comments ["-- The package version.","-- See the Haskell package versioning policy (PVP) for standards","-- guiding when and how versions should be incremented.","-- https://pvp.haskell.org","-- PVP summary:     +-+------- breaking API changes","--                  | | +----- non-breaking API additions","--                  | | | +--- code changes with no API change"]),(25,Comments ["-- A short (one-line) description of the package.","-- synopsis:","","-- A longer description of the package.","-- description:","","-- The license under which the package is released."]),(34,Comments ["-- The file containing the license text."]),(37,Comments ["-- The package author(s).","-- author:","","-- An email address to which users can send suggestions, bug reports, and patches.","-- maintainer:","","-- A copyright notice.","-- copyright:"]),(47,Comments ["-- Extra doc files to be distributed with the package, such as a CHANGELOG or a README."]),(50,Comments ["-- Extra source files to be distributed with the package, such as examples, or a tutorial module.","-- extra-source-files:",""]),(57,Comments ["-- Import common warning flags."]),(60,Comments ["-- Modules exported by the library."]),(63,Comments ["-- Modules included in this library but not exported.","-- other-modules:","","-- LANGUAGE extensions used by modules in this package.","-- other-extensions:","","-- Other library packages from which modules are imported."]),(72,Comments ["-- Directories containing source files."]),(75,Comments ["-- Base language which the package is written in."]),(79,Comments ["-- Import common warning flags."]),(82,Comments ["-- .hs or .lhs file containing the Main module."]),(85,Comments ["-- Modules included in this executable, other than Main.","-- other-modules:","","-- LANGUAGE extensions used by modules in this package.","-- other-extensions:","","-- Other library packages from which modules are imported."]),(96,Comments ["-- Directories containing source files."]),(99,Comments ["-- Base language which the package is written in."]),(103,Comments ["-- Import common warning flags."]),(106,Comments ["-- Base language which the package is written in."]),(109,Comments ["-- Modules included in this executable, other than Main.","-- other-modules:","","-- LANGUAGE extensions used by modules in this package.","-- other-extensions:","","-- The interface type and version of the test suite."]),(118,Comments ["-- Directories containing source files."]),(121,Comments ["-- The entrypoint to the test suite."]),(124,Comments ["-- Test dependencies."])]
+
+* ToDo Clean up
 
 #+begin_src haskell-ng :results output
 :r
@@ -252,7 +496,7 @@ import Text.Pretty.Simple
 : Ok, three modules loaded.
 
 
-* State
+** State
 
 #+begin_src haskell :results output
 vlibs <- Map.delete "acme-everything" <$> validLatestLibs
@@ -271,8 +515,8 @@ vertexCount depG
 : 15711
 : 15711
 
-* tar development
-** entries
+** tar development
+*** entries
 #+begin_src haskell :results output
 Tar.entryPath <$> take 5 es
 #+end_src
@@ -298,7 +542,7 @@ length es
 #+RESULTS:
 : True
 
-** Maximum file size:
+*** Maximum file size:
 
 #+begin_src haskell :results output
 (\xs -> filter ((maximum (snd <$> xs) ==) . snd) xs) $ [(fp,x) | (fp, Tar.NormalFile _ x) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
@@ -307,7 +551,7 @@ length es
 #+RESULTS:
 : [("acme-everything/2018.11.18/acme-everything.cabal",261865)]
 
-** zero size
+*** zero size
 
 #+begin_src haskell :results output
 (\xs -> filter ((0 ==) . snd) xs) $ [(fp,x) | (fp, Tar.NormalFile _ x) <- (\e -> (Tar.entryPath e, Tar.entryContent e)) <$> es]
@@ -316,7 +560,7 @@ length es
 #+RESULTS:
 : [("lzma/preferred-versions",0),("signal/preferred-versions",0),("peyotls-codec/preferred-versions",0),("th-orphans/preferred-versions",0),("GPipe/preferred-versions",0),("GPipe/preferred-versions",0),("base-orphans/preferred-versions",0),("MailchimpSimple/preferred-versions",0),("warp/preferred-versions",0),("table-layout/preferred-versions",0),("d3d11binding/preferred-versions",0),("shakespeare-sass/preferred-versions",0),("kawhi/preferred-versions",0),("hip/preferred-versions",0),("lowgl/preferred-versions",0),("lowgl/preferred-versions",0),("NetSNMP/preferred-versions",0),("xml-conduit/preferred-versions",0),("penrose/preferred-versions",0),("aeson-diff/preferred-versions",0),("milena/preferred-versions",0),("hruby/preferred-versions",0),("hruby/preferred-versions",0),("parsec/preferred-versions",0),("qchas/preferred-versions",0),("monadiccp/preferred-versions",0),("preprocessor-tools/preferred-versions",0),("line-bot-sdk/preferred-versions",0),("debug-dump/preferred-versions",0),("microlens-process/preferred-versions",0),("doldol/preferred-versions",0),("doldol/preferred-versions",0),("tensorflow-core-ops/preferred-versions",0),("bitwise-enum/preferred-versions",0),("bitwise-enum/preferred-versions",0),("simple-cabal/preferred-versions",0),("zip/preferred-versions",0),("shake-plus/preferred-versions",0),("tasty-html/preferred-versions",0),("logict/preferred-versions",0),("hw-kafka-client/preferred-versions",0),("geojson/preferred-versions",0),("dialogue/preferred-versions",0),("scalendar/preferred-versions",0)]
 
-** preferred-versions
+*** preferred-versions
 
 [[https://hackage.haskell.org/package/Cabal/preferred][Cabal: preferred and deprecated versions | Hackage]]
 
@@ -334,7 +578,7 @@ length $ (\xs -> filter ((List.isSuffixOf "preferred-versions") . fst) xs) $ [(f
 #+RESULTS:
 : 3280
 
-** package.json
+*** package.json
 
 =package-json= content is a security/signing feature you can read about in [[https://github.com/haskell/hackage-security/blob/master/README.md][hackage-security]].
 
@@ -345,7 +589,7 @@ length $ filter ((== "package.json") . filenameFN . runP filenameP . FP.strToUtf
 #+RESULTS:
 : 134994
 
-** filename conventions
+*** filename conventions
 
 Either *.cabal, preferred_version or package.json
 
@@ -367,7 +611,7 @@ take 20 $ filter ((/="package.json") . fileName) $ filter (\f -> (CabalFix.Archi
 take 2 $ filter ((/="package.json") . fileName . filename . FP.strToUtf8 . fst) $ rs
 #+end_src
 
-** version ranges
+*** version ranges
 
 #+begin_src haskell :results output
 length $ (CabalFix.Archive.version . versionFN . filename . FP.strToUtf8 . fst) <$> rs
@@ -410,7 +654,7 @@ minimum x1
 #+RESULTS:
 : Version [0,0,1]
 
-**** all versions are unique?
+***** all versions are unique?
 
 #+begin_src haskell :results output
 take 10 $ Map.toList $ Map.filter (\a -> length a /= length (List.nub a)) mVersions
@@ -419,7 +663,7 @@ take 10 $ Map.toList $ Map.filter (\a -> length a /= length (List.nub a)) mVersi
 #+RESULTS:
 : []
 
-**** Version counts
+***** Version counts
 
 #+begin_src haskell :results output
 take 10 $ List.sortOn (Down . snd) $ Map.toList $ Map.map length mVersions
@@ -428,7 +672,7 @@ take 10 $ List.sortOn (Down . snd) $ Map.toList $ Map.map length mVersions
 #+RESULTS:
 : [("haskoin-store",293),("git-annex",278),("hlint",221),("yesod-core",213),("warp",201),("purescript",200),("egison",190),("hakyll",190),("pandoc",187),("persistent",184)]
 
-** latest cabals
+*** latest cabals
 
 #+begin_src haskell :results output
 getVersion = runP versionP . versionFN . filename . FP.strToUtf8 . fst
@@ -444,7 +688,7 @@ length $ (second fst <$> (Map.toList $ mLatest))
 #+RESULTS:
 : 17445
 
-** readFields
+*** readFields
 
 A few packages give a bad readFields
 
@@ -457,9 +701,8 @@ Map.map fst $ Map.filter (isLeft . readFields . BSL.toStrict . snd) $ mLatest --
 
 #+RESULTS:
 
-
-** field counts
-*** author
+*** field counts
+**** author
 
 #+begin_src haskell :results output
 take 40 $ List.sortOn (Down . snd) $ Map.toList $ count_ $ mconcat $ fmap snd $ Map.toList $ Map.map (mconcat . fmap author . snd) vlls
@@ -468,7 +711,7 @@ take 40 $ List.sortOn (Down . snd) $ Map.toList $ count_ $ mconcat $ fmap snd $ 
 #+RESULTS:
 : [("Brendan Hay",529),("Nikita Volkov <nikita.y.volkov@mail.ru>",148),("Tom Sydney Kerckhove",119),("Andrew Martin",110),("Edward A. Kmett",99),("OleksandrZhabenko",88),("Henning Thielemann <haskell@henning-thielemann.de>",87),("Michael Snoyman",83),("Daniel Firth",80),("M Farkas-Dyck",79),("Vanessa McHale",75),("Vincent Hanquez <vincent@snarc.org>",63),("Chris Martin",61),("Oleg Grenrus <oleg.grenrus@iki.fi>",59),("Renzo Carbonara",57),("Michael Snoyman <michael@snoyman.com>",52),("Tony Morris <\202\135\199\157u\203\153s\196\177\201\185\201\185o\201\175\202\135@\215\159\215\159\199\157\202\158s\201\144\201\165>",50),("I\195\177aki Garc\195\173a Etxebarria",48),("chessai",48),("Fumiaki Kinoshita",47),("John Ky",46),("Ian Duncan",45),("Chris Done",42),("Athan Clark",39),("Chris Penner",36),("Jeremy Shaw",35),("Kazu Yamamoto <kazu@iij.ad.jp>",35),("Bryan O'Sullivan <bos@serpentine.com>",34),("Herbert Valerio Riedel",34),("John Wiegley",34),("Torsten Schmits",34),("Marco Zocca",33),("Jakub Waszczuk",32),("Jinjing Wang",32),("Rohan Drape",32),("HirotomoMoriwaki<philopon.dependence@gmail.com>",31),("James Cook <mokus@deepbondi.net>",31),("Jonathan Fischoff",31),("Justin Le",30),("Obsidian Systems LLC",30)]
 
-*** libraries
+**** libraries
 
 not libraries
 
@@ -497,7 +740,7 @@ take 10 $ Map.toList $ Map.filter (\x -> x/=[[]] && x/=[] && listToMaybe x /= Ju
 #+RESULTS:
 : [("LiterateMarkdown",[[("name","converter")]]),("attoparsec",[[("name","attoparsec-internal")],[]]),("balkon",[[("name","balkon-internal")],[]]),("buffet",[[("name","buffet-internal")]]),("cabal-fmt",[[("name","version-interval")],[("name","cabal-fmt-internal")]]),("cuckoo",[[("name","random-internal")],[]]),("dhrun",[[("name","dhrun-lib")]]),("escoger",[[("name","escoger-lib")]]),("ghc-plugs-out",[[("name","no-op-plugin")],[("name","undefined-init-plugin")],[("name","undefined-solve-plugin")],[("name","undefined-stop-plugin")],[("name","call-count-plugin")]]),("hackage-cli",[[("name","cabal-revisions")]])]
 
-*** common stanzas
+**** common stanzas
 
 #+begin_src haskell :exports both
 length $ Map.toList $ Map.filter (/=[]) $ fmap (catMaybes . fmap (sec "common")) $ fmap snd vlls
@@ -516,7 +759,7 @@ Map.size vlibs
 #+RESULTS:
 : 15711
 
-** dependencies
+*** dependencies
 
 Total number of build dependencies in library stanzas and in common stanzas:
 
@@ -568,9 +811,9 @@ count_ $ mconcat $ C.unpack <$> (mconcat $ fmap snd $ Map.toList $ fmap (fmap mc
 #+RESULTS:
 : fromList [('\t',42),(' ',613471),('&',92586),('(',406),(')',406),('*',6131),(',',99089),('-',34798),('.',151089),('0',83272),('1',67896),('2',36311),('3',21528),('4',31320),('5',23732),('6',10261),('7',10046),('8',6972),('9',6851),(':',14),('<',48417),('=',83864),('>',69505),('A',268),('B',250),('C',1164),('D',478),('E',76),('F',144),('G',346),('H',826),('I',103),('J',118),('K',15),('L',512),('M',404),('N',79),('O',288),('P',437),('Q',631),('R',247),('S',559),('T',540),('U',202),('V',75),('W',74),('X',92),('Y',24),('Z',17),('^',3550),('a',78888),('b',31479),('c',38321),('d',21422),('e',116357),('f',13092),('g',17571),('h',17821),('i',56079),('j',560),('k',8075),('l',36458),('m',27855),('n',57977),('o',50979),('p',30459),('q',2559),('r',71441),('s',83946),('t',95874),('u',14974),('v',7119),('w',4030),('x',10866),('y',19248),('z',1673),('{',100),('|',2386),('}',100)]
 
-** deps
+*** deps
 
-*** parse error check
+**** parse error check
 
 Looks like no leftovers and no errors
 
@@ -610,7 +853,7 @@ FP.runParser (FP.many depP) ",LambdaHack >= 0.11.0.0 && < 0.11.1.0,async,base >=
 #+RESULTS:
 : OK [("LambdaHack",">= 0.11.0.0 && < 0.11.1.0"),("async",""),("base",">= 4.10 && < 99"),("enummapset",""),("file-embed",">= 0.0.11"),("filepath",""),("hsini",""),("ghc-compact",""),("optparse-applicative",""),("primitive",""),("splitmix",""),("template-haskell",""),("text",""),("th-lift-instances",""),("transformers","")] ""
 
-*** deps - Map of dependencies
+**** deps - Map of dependencies
 
 #+begin_src haskell :results output :exports both
 deps = fmap fst . runParser_ (FP.many depP) . mconcat . mconcat . rawBuildDeps . snd <$> vlibs
@@ -676,7 +919,7 @@ length bdnames
 #+RESULTS:
 : 5982
 
-*** dependency name errors
+**** dependency name errors
 
 dependees not in the cabal index:
 
@@ -704,7 +947,7 @@ sum $ fmap snd $ Map.toList $ fmap length vdeps
 : 15711
 : 112974
 
-*** potential error sources
+**** potential error sources
 
 - [X] error 1 - commas can be inside braces
 
@@ -732,7 +975,7 @@ Empty lists are mostly due to bad conditional parsing
  #+RESULTS:
  : 267
 
-** algebraic-graphs
+*** algebraic-graphs
 
 An (algebraic) graph of dependencies:
 
@@ -772,7 +1015,7 @@ edgeCount depG
 : 15711
 : 112169
 
-** graphics
+*** graphics
 
 =text= package dependency example
 
@@ -829,7 +1072,7 @@ supers = upstreams "text" depG <> Set.singleton "text"
  #+RESULTS:
  [[file:other/mealy.svg]]
 
-* Retrieve test cabals
+** Retrieve test cabals
 
 #+begin_src haskell :results output
 cs <- getTestCabals
@@ -854,7 +1097,7 @@ void $ mapM (\(fp,bs) -> BS.writeFile ("/Users/tonyday/haskell/cabal-fix/test/re
 
 #+RESULTS:
 
-** cabalFix idempotence
+*** cabalFix idempotence
 
 #+begin_src haskell :results output
 xs <- getTestCabals
@@ -870,7 +1113,7 @@ xs' == (second (cabalFix (defaultConfig)) <$> xs')
 #+RESULTS:
 : True
 
-* Diff
+** Diff
 
 #+begin_src haskell :results output
 import Data.Algorithm.DiffOutput
@@ -889,7 +1132,7 @@ prettyDiffs $ diffToLineRanges $ getGroupedDiff (C.unpack <$> C.dropWhile isSpac
 : lang
 : 46a48
 
-* all the cabals
+** all the cabals
 
 #+begin_src haskell :results output
 allCabalProjects "/Users/tonyday/haskell"
@@ -906,7 +1149,7 @@ cs <- allCabals "/Users/tonyday/haskell"
 #+RESULTS:
 : cs :: [(String, ByteString)]
 
-** write all the cabals
+*** write all the cabals
 
 #+begin_src haskell :results output
 cs <- getCabalFiles "/Users/tonyday/haskell/cabal-fix/test/rendered/"
@@ -923,7 +1166,7 @@ sequence_ (zipWith (\n bs -> BS.writeFile ("/Users/tonyday/haskell/" <> n <> "/"
 
 #+RESULTS:
 
-* writing licenses
+** writing licenses
 
 #+begin_src haskell :results output
 ps <- allCabalProjects "/Users/tonyday/haskell"
@@ -944,7 +1187,7 @@ sequence_ $ fromMaybe (pure ()) . (\p -> BS.writeFile ("/Users/tonyday/haskell/"
 
 #+RESULTS:
 
-* categories
+** categories
 
 #+begin_src haskell :results output
 myCats = first (takeWhile (/='.')) . second ((maybe "" (\(Field _ ((FieldLine _ c:_))) -> c)) . listToMaybe . filter (hasName ["category"]) . toFields) <$> cs
@@ -1172,7 +1415,7 @@ RESULTS:
 ]
 #+end_example
 
-* manual over-writes
+** manual over-writes
 
 #+begin_src haskell :results output
 cfg = defaultConfig {replaceCategory = True, replaceCopyright = True}
@@ -1186,7 +1429,7 @@ void $ mapM (\(fp,bs) -> BS.writeFile ("/Users/tonyday/haskell/cabal-fix/test/re
 
 #+RESULTS:
 
-* individual directory cabal
+** individual directory cabal
 
 #+begin_src haskell :results output
 fp = "/Users/tonyday/haskell/eulerproject/eulerproject.cabal"
@@ -1196,7 +1439,7 @@ cabalFixFile fp cfg
 
 #+RESULTS:
 
-* cabal-fix.hs development
+** cabal-fix.hs development
 
 #+begin_src haskell :results output
 d <- getCurrentDirectory
@@ -1267,8 +1510,7 @@ ansiWlEditExpr <$> patch bs bs'
 
 #+RESULTS:
 : Nothing
-
-* Sorted fieldOrdering
+** Sorted fieldOrdering
 
 #+begin_src haskell-ng :results output
 zipWith (\o l -> (fst l, o)) [0..] (List.sortOn snd $ fieldOrdering defaultConfig)

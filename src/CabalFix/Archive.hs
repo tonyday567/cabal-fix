@@ -3,7 +3,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 -- | Archive investigation
-
 module CabalFix.Archive where
 
 import qualified Codec.Archive.Tar as Tar
@@ -19,10 +18,9 @@ import Distribution.Fields
 import Data.Bifunctor
 import Data.Either
 import Data.Maybe
-import CabalFix ( sec )
 import Distribution.Version
 import Distribution.Parsec
-import CabalFix.FlatParse
+import CabalFix.FlatParse ( runParser_, untilP )
 
 cabalIndex :: IO FilePath
 cabalIndex = do
@@ -66,5 +64,6 @@ latestValidFields = do
 
 -- | valid cabal files with all fields parsing ok, and at least one library section.
 validLatestLibs :: IO (Map.Map ByteString (Version, [Field Position]))
-validLatestLibs = do
-  Map.filter (not . null . mapMaybe (sec "library") . snd) <$> latestValidFields
+validLatestLibs =
+  -- FIXME:
+  Map.filter (not . null . mapMaybe (const Nothing {-sec "library"-} ) . snd) <$> latestValidFields

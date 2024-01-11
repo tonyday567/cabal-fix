@@ -1,30 +1,46 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedLabels #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
-{-# OPTIONS_GHC -Wno-x-partial #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module CabalFix
   ( Config (..),
     defaultConfig,
-    cabalFix,
-    cabalFixFile,
-    getCabalFiles,
-    filterChangedEdit,
-    getCabalFile,
-    sec,
     AddPolicy (..),
     CommaStyle (..),
     DepAlignment (..),
     ValueAlignment (..),
     Margin (..),
+    Comment,
+    CabalFixWarning,
+    CabalFields (..),
+    cabalFields',
+    parseCabalFields,
+    fixCabalFields,
+    printCabalFields,
+    fixCabalFile,
+
+    -- FIXME: working list
+    topfield',
+    field',
+    subfield',
+    section',
+    fieldOrSection',
+    name',
+    pname,
+    fieldLines',
+    fieldName',
+    secArg',
+    fieldLine',
 )
 where
 
-import CabalFix.FlatParse
+import CabalFix.FlatParse ( depP, runParserEither )
 import Control.Monad
 import Data.Bifunctor
 import Data.Bool
@@ -38,55 +54,69 @@ import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
 import Data.TreeDiff hiding (FieldName)
-import Data.TreeDiff qualified as T
-import Data.TreeDiff.OMap qualified as O
 import Distribution.Fields
-import Distribution.Fields.Field hiding (fieldUniverse)
+import Distribution.Fields.Field
 import Distribution.Parsec
 import Distribution.Pretty
 import Distribution.Utils.Generic
 import Distribution.Version
-import GHC.Generics
-import System.Directory
+import GHC.Generics hiding (to)
 import Text.PrettyPrint qualified as PP
 import Prelude
+import Optics.Extra
+import Data.TreeDiff.OMap
+import Data.Vector qualified as V
+import Control.Category ((>>>))
 
 -- | Configuration values for varius aspects of rendering a cabal file.
 data Config = Config
   { -- | fields that should be converted to free text
     freeTexts :: [ByteString],
     -- | fields that should be removed
-    removals :: [ByteString],
+    fieldRemovals :: [ByteString],
     -- | Preferred dependency ranges
     preferredDeps :: [(ByteString, ByteString)],
-    overwrites :: [(ByteString, ByteString, AddPolicy)],
+    -- | Add fields (Overwriting depends on an 'AddPolicy')
+    addFields :: [(ByteString, ByteString, AddPolicy)],
     -- | Fields where CommaStyle should be checked and fixed.
-    fixCommas :: [(ByteString, CommaStyle)],
+    fixCommas :: [(ByteString, CommaStyle, CommaTrail)],
     -- | Fields where elements should be sorted alphabetically
     sortFieldLines :: [ByteString],
     -- | Whether to sort Fields.
-    sortFields :: Bool,
+    doSortFields :: Bool,
     -- | The preferred ordering of Fields if they are sorted (lower numbers are placed first).
     fieldOrdering :: [(ByteString, Double)],
     -- | Whether to fix the build dependency Field
-    fixBuildDeps :: Bool,
+    doFixBuildDeps :: Bool,
     -- | How to align build dependencies
     depAlignment :: DepAlignment,
     -- | Whether to remove Fields with no information
     removeBlankFields :: Bool,
     -- | Whether to column-align values
     valueAligned :: ValueAlignment,
+    -- | The number of spaces between the field nameand the value, if aligned.
+    valueAlignGap :: Int,
     -- | Margin between sections
     sectionMargin :: Margin,
     -- | Margin around comments
     commentMargin :: Margin,
-    -- | Adopt narrow style bloew this column number.
+    -- | Shift from narrow style to multi-line beyond this column size.
     narrowN :: Int,
     -- | Indentation value
     indentN :: Int
   }
-  deriving (Eq, Show, Read)
+  deriving (Eq, Show, Read, Generic)
 
+-- | An opinionated configuration for formatting cabal files.
+--
+-- Some opinions:
+--
+-- 'PrefixCommas' are better for the dependency list as dependency ranges are already noisy enough without a comma thrown in.
+-- >>> fixCommas defaultConfig
+-- [("extra-doc-files",NoCommas,NoTrailer),("build-depends",PrefixCommas,Trailer)]
+--
+--
+--
 defaultConfig :: Config
 defaultConfig =
   Config
@@ -102,6 +132,7 @@ defaultConfig =
     DepAligned
     True
     ValueUnaligned
+    1
     Margin
     NoMargin
     60
@@ -117,9 +148,15 @@ data CommaStyle
     FreeformCommas
   | -- | remove commas (allowed for some fields)
     NoCommas
-  deriving (Eq, Show, Read)
+  deriving (Eq, Show, Read, Generic)
 
--- | Policy for Fields listed in 'overwrites'
+-- | Include a trailing or leading comma
+data CommaTrail
+  = Trailer
+  | NoTrailer
+  deriving (Eq, Show, Read, Generic)
+
+-- | Policy for Fields listed in 'addFields'
 data AddPolicy
   = -- | Replace existing values
     AddReplace
@@ -127,19 +164,19 @@ data AddPolicy
     AddAppend
   | -- | Add only of the Field doesn't exist
     AddIfNotExisting
-  deriving (Eq, Show, Read)
+  deriving (Eq, Show, Read, Generic)
 
-defaultFixCommas :: [(ByteString, CommaStyle)]
+defaultFixCommas :: [(ByteString, CommaStyle, CommaTrail)]
 defaultFixCommas =
-    [ ("extra-doc-files", NoCommas),
-      ("build-depends", PrefixCommas)
+    [ ("extra-doc-files", NoCommas, NoTrailer),
+      ("build-depends", PrefixCommas, Trailer)
     ]
 
 -- | An opionated ordering of fields.
 defaultFieldOrdering :: [(ByteString, Double)]
 defaultFieldOrdering = [("cabal-version", 0), ("import", 1), ("main-is", 2), ("default-language", 3), ("name", 4), ("hs-source-dirs", 5), ("version", 6), ("build-depends", 7), ("exposed-modules", 8), ("license", 9), ("license-file", 10), ("other-modules", 11), ("copyright", 12), ("category", 13), ("author", 14), ("default-extensions", 15), ("ghc-options", 16), ("maintainer", 17), ("homepage", 18), ("bug-reports", 19), ("synopsis", 20), ("description", 21), ("build-type", 22), ("tested-with", 23), ("extra-doc-files", 24), ("source-repository", 25), ("type", 26), ("common", 27), ("location", 28), ("library", 29), ("executable", 30), ("test-suite", 31)]
 
--- | An opinionated list of fields whose elements should be sorted.
+-- An opinionated list of fields whose elements should be sorted.
 defaultFieldLineSorts :: [ByteString]
 defaultFieldLineSorts =
   [ "build-depends",
@@ -150,102 +187,334 @@ defaultFieldLineSorts =
     "tested-with"
   ]
 
--- | An opinionated list of preferred builddeps:
+-- An opinionated list of preferred builddeps:
 --
--- >>> preferredDepsBS
 defaultPreferredDeps :: [(ByteString, ByteString)]
 defaultPreferredDeps = [("base", ">=4.7 && <5")]
 
-cabalFix :: Config -> ByteString -> ByteString
-cabalFix rcfg bs = (C.pack . showFields'' rcfg fComment (const id) (indentN rcfg) . fmap (fmap (fmap C.unpack)) . printFieldsComments $ fs') <> C.unlines extras
+data ValueAlignment = ValueAligned | ValueUnaligned deriving (Eq, Show, Read, Generic)
+
+data DepAlignment = DepAligned | DepUnaligned deriving (Eq, Show, Read)
+
+data Margin = Margin | NoMargin
+  deriving (Eq, Show, Read, Generic)
+
+-- | Collapse margins, any margin = margin
+instance Semigroup Margin where
+  NoMargin <> NoMargin = NoMargin
+  _ <> _ = Margin
+
+type Comment = [ByteString]
+
+-- | 'Field' list annotated with a 'Comment'
+--
+-- Note that this information does not contain any position information.
+--
+-- This construction assumes that comments relate to fields below, so there is potential for an end comment unrelated to any particular field.
+--
+data CabalFields = CabalFields { fields :: V.Vector (Field Comment), endComment :: Comment } deriving (Generic, Eq, Show)
+
+instance Semigroup CabalFields
   where
-    (fs, extras) = parseFieldsAndComments (freeTexts rcfg) bs
-    -- position info is now gone
-    (Field (Name _ _) (FieldLine _ libdep : _)) = head $ filter (hasName ["name"]) fs
-    fs' =
-      defaultSortFields rcfg $
-        fmap (sortFieldLinesFor (sortFieldLines rcfg)) $
-          bool id (fmap (fixBuildDeps' rcfg libdep)) (fixBuildDeps rcfg) $
-            adds rcfg $
-              fmap (fixcommas' rcfg) $
-                bool id (filter (not . isBlankField)) (removeBlankFields rcfg) $
-                  filter (not . hasName (removals rcfg)) fs
+    (CabalFields fs ec) <> (CabalFields fs' ec') = CabalFields (fs <> fs') (ec <> ec')
+
+instance Monoid CabalFields
+  where
+    mempty = CabalFields V.empty []
+
+fieldList :: Iso' (V.Vector (Field Comment)) [Field Comment]
+fieldList = iso V.toList V.fromList
+
+instance ToExpr (FieldLine Comment) where
+  toExpr fl = Rec "FieldLine" (fromList [("comment", toExpr (fieldLineAnn fl)), ("fieldline", toExpr (fieldLineBS fl))])
+
+instance ToExpr (Name Comment) where
+  toExpr n = Rec "Name" (fromList [("comment", toExpr (nameAnn n)), ("name", toExpr (getName n))])
+
+instance ToExpr (SectionArg Comment) where
+  toExpr (SecArgName c bs) = Rec "SecArgName" (fromList [("comment", toExpr c), ("arg", toExpr bs)])
+  toExpr (SecArgStr c bs) = Rec "SecArgStr" (fromList [("comment", toExpr c), ("arg", toExpr bs)])
+  toExpr (SecArgOther c bs) = Rec "SecArgOther" (fromList [("comment", toExpr c), ("arg", toExpr bs)])
+
+instance ToExpr (Field Comment) where
+  toExpr (Field n fls) = Rec "Field" (fromList [("name", toExpr n), ("field lines", toExpr fls)])
+  toExpr (Section n ss fs) = Rec "Section" (fromList [("name", toExpr n), ("section args", toExpr ss),("fields", toExpr fs)])
+
+instance ToExpr CabalFields where
+  toExpr cf = Rec "CabalFields" (fromList [("fields", toExpr $ fields cf),("extras", toExpr $ endComment cf)])
+
+-- | Error
+data CabalFixWarning
+
+-- | A Prism betwixt a ByteString and CabalFields.
+--
+cabalFields' :: Config -> Prism' ByteString CabalFields
+cabalFields' cfg = prism (printCabalFields cfg) (parseCabalFields cfg)
+
+
+-- * lenses
+
+-- | First biased lens
+topfield' :: FieldName -> Lens' CabalFields (Maybe (Field Comment))
+topfield' name = lens (view (#fields % fieldList % field' name) >>> listToMaybe) (fieldSet name)
+
+field' :: FieldName -> Getter [Field Comment] [Field Comment]
+field' name = to (filter (not . isSection) . filter (isName name))
+
+subfield' :: FieldName -> Getter (Field Comment) [Field Comment]
+subfield' name = to (subfield_ name)
+
+subfield_ :: FieldName -> Field ann -> [Field ann]
+subfield_ name f = filter (isName name) $ fieldUniverse f
+
+section' :: FieldName -> Getter [Field ann] [Field ann]
+section' name = to (filter (\f -> isName name f && isSection f))
+
+fieldOrSection' :: FieldName -> Getter [Field ann] [Field ann]
+fieldOrSection' name = to (filter (isName name))
+
+isName :: FieldName -> Field ann -> Bool
+isName name = (==name) . view fieldName'
+
+isSection :: Field ann -> Bool
+isSection (Section {}) = True
+isSection (Field {}) = False
+
+-- first element biased, can change name
+fieldSet :: FieldName -> CabalFields -> Maybe (Field Comment) -> CabalFields
+fieldSet name cf f =
+  case V.findIndex ((==name) . getName . fieldName) (view #fields cf) of
+    Just i -> case f of
+      Nothing -> cf & over #fields (\v -> V.take i v <> V.drop (i+1) v)
+      Just f' -> cf & over #fields (\v -> V.take i v <> V.singleton f' <> V.drop (i+1) v)
+    Nothing -> cf & maybe id (over #fields . (\f -> (<> V.singleton f))) f
+
+overField :: (Field ann -> Field ann) -> Field ann -> Field ann
+overField f' f@(Field {}) = f' f
+overField f' (Section n sa fs) = Section n sa (fmap (overField f') fs)
+
+overFields :: ([Field ann] -> [Field ann]) -> [Field ann] -> [Field ann]
+overFields f fs = f $ fmap inner fs
+  where
+    inner f'@(Field {}) = f'
+    inner (Section n sa fs') = Section n sa (overFields f fs')
+
+name' :: AffineTraversal' CabalFields ByteString
+name' = topfield' "name" % _Just % fieldName'
+
+pname :: CabalFields -> ByteString
+pname cf = cf & toListOf name' & listToMaybe & fromMaybe (error "project name missing")
+
+fieldName' :: Lens' (Field ann) ByteString
+fieldName' = lens (fieldName >>> getName) fieldNameSet
+  where
+    fieldNameSet (Field (Name ann _) fls) name = Field (Name ann name) fls
+    fieldNameSet (Section (Name ann _) sa fs) name = Section (Name ann name) sa fs
+
+inNameList :: [ByteString] -> Field ann -> Bool
+inNameList ns f = view fieldName' f `elem` ns
+
+fieldLines' :: Lens' (Field ann) [FieldLine ann]
+fieldLines' = lens fieldFieldLinesView fieldFieldLinesSet
+
+fieldFieldLinesView :: Field ann -> [FieldLine ann]
+fieldFieldLinesView (Field _ fls) = fls
+fieldFieldLinesView _ = []
+
+fieldFieldLinesSet :: Field ann -> [FieldLine ann] -> Field ann
+fieldFieldLinesSet (Field n _) fls = Field n fls
+fieldFieldLinesSet _ _ = error "setting a section field line"
+
+-- * SectionArg
+secArg' :: Lens' (SectionArg a) (ByteString, ByteString)
+secArg' = lens secArgView secArgSet
+
+-- | SectionArg
+secArgView :: SectionArg a -> (ByteString, ByteString)
+secArgView (SecArgName _ n) = ("name", n)
+secArgView (SecArgStr _ n) = ("str", n)
+secArgView (SecArgOther _ n) = ("other", n)
+
+secArgSet :: SectionArg ann -> (ByteString, ByteString) -> SectionArg ann
+secArgSet sa (t, a) = case t of
+  "name" -> SecArgName (sectionArgAnn sa) a
+  "str" -> SecArgStr (sectionArgAnn sa) a
+  _ -> SecArgOther (sectionArgAnn sa) a
+
+fieldLine' :: Lens' (FieldLine ann) ByteString
+fieldLine' = lens fieldLineBS setValueFL
+  where
+    setValueFL (FieldLine ann _) = FieldLine ann
+
+-- * fixes
+
+-- | fix order:
+--
+-- - removes fields
+--
+-- - removes blank fields
+--
+-- - fixes commas
+--
+-- - adds Fields
+--
+-- - fix build dependencies
+--
+-- - sort field lines
+--
+-- - sort fields
+fixCabalFields :: Config -> CabalFields -> CabalFields
+fixCabalFields cfg cf =
+  cf & over (#fields % fieldList)
+  ( overFields (filter (not . inNameList (fieldRemovals cfg))) >>>
+    overFields (bool id (filter (not . isBlankField)) (removeBlankFields cfg)) >>>
+    fmap (overField (fixesCommas cfg)) >>>
+    -- FIXME: top fields only
+    addsFields cfg >>>
+    bool id (fmap (fixBuildDeps cfg (pname cf))) (doFixBuildDeps cfg) >>>
+    fmap (overField (sortFieldLinesFor (sortFieldLines cfg))) >>>
+    bool id (overFields (sortFields cfg)) (doSortFields cfg)
+  )
+
+fixCabalFile :: FilePath -> Config -> IO Bool
+fixCabalFile fp cfg = do
+  bs <- BS.readFile fp
+  maybe
+    (pure False)
+    (\cf -> BS.writeFile fp (printCabalFields cfg (fixCabalFields cfg cf)) >> pure True)
+    (preview (cabalFields' cfg) bs)
+
+-- * blank field removal
+
+isBlankField :: Field ann -> Bool
+isBlankField (Field _ fs) = null fs
+isBlankField (Section _ _ fss) = null fss
+
+-- * commas
+fixesCommas :: Config -> Field ann -> Field ann
+fixesCommas cfg x = foldl' (&) x $ fixCommas cfg & fmap (\(n, s, t) -> bool id (fixCommasF s t) ((==n) $ view fieldName' x))
+
+addCommaBS :: CommaStyle -> CommaTrail -> [ByteString] -> [ByteString]
+addCommaBS commaStyle trailStyle xs = case trailStyle of
+  NoTrailer -> case commaStyle of
+    PostfixCommas -> ((<> ",") <$> init xs) <> [last xs]
+    PrefixCommas -> head xs:((", "<>) <$> tail xs)
+    -- since we don't know the prior comma strategy, we just guess here.
+    FreeformCommas -> ((<> ",") <$> init xs) <> [last xs]
+    NoCommas -> xs
+  Trailer -> case commaStyle of
+    PostfixCommas -> (<> ",") <$> xs
+    PrefixCommas -> (", "<>) <$> xs
+    -- since we don't know the prior comma strategy, we just guess here.
+    FreeformCommas -> (<> ",") <$> xs
+    NoCommas -> xs
+
+stripCommaBS :: ByteString -> ByteString
+stripCommaBS bs =
+  C.stripPrefix ", " bs &
+  fromMaybe (C.stripPrefix "," bs &
+  fromMaybe (C.stripSuffix "," bs &
+  fromMaybe bs))
+
+fixCommasF :: CommaStyle -> CommaTrail -> Field ann -> Field ann
+fixCommasF s t f = fls'
+  where
+    fls = toListOf (fieldLines' % each % fieldLine') f
+    fls' = set fieldLines' (zipWith (set fieldLine') (addCommaBS s t $ fmap stripCommaBS fls) (view fieldLines' f)) f
+
+-- * add fields
+-- FIXME: top section only
+addsFields :: Config -> [Field Comment] -> [Field Comment]
+addsFields cfg x = foldl' (&) x $ addFields cfg & fmap (\(n, v, p) -> addField p (Field (Name [] n) [FieldLine [] v]))
+
+addField :: AddPolicy -> Field ann -> [Field ann] -> [Field ann]
+addField p f fs = case p of
+  AddReplace -> notsames <> [f]
+  AddAppend -> fs <> [f]
+  AddIfNotExisting -> bool fs (fs <> [f]) (null sames)
+  where
+    sames = filter ((view fieldName' f ==) . view fieldName') fs
+    notsames = filter ((view fieldName' f /=) . view fieldName') fs
+
+-- * fix build-depends
+fixBuildDeps :: Config -> FieldName -> Field ann -> Field ann
+fixBuildDeps cfg pname f = overField (bool id (over fieldLines' (fixBDLines cfg pname)) (isName "build-depends" f)) f
+
+fixBDLines :: Config -> ByteString -> [FieldLine ann] -> [FieldLine ann]
+fixBDLines cfg libdep fls = fls'
+  where
+    align = depAlignment cfg
+    deps = [x| (Right x) <- parseDepFL <$> fls]
+    pds = addCommaBS commaStyle trailStyle $ printDepsPreferred cfg libdep align deps
+    fls' = zipWith (set fieldLine') pds fls
+
+    (commaStyle, trailStyle) =
+      maybe (PostfixCommas,NoTrailer) (\(_,x,y) -> (x,y))
+      (find ((=="build-depends") . (\(x,_,_) -> x)) (fixCommas cfg))
+
+data Dep = Dep {dep :: ByteString, depRange :: ByteString} deriving (Show, Ord, Eq, Generic)
+
+normDepRange :: ByteString -> ByteString
+normDepRange dr = (maybe dr (C.pack . show . pretty) . (simpleParsecBS :: ByteString -> Maybe VersionRange)) dr
+
+printDepPreferred :: Config -> ByteString -> Int -> Dep -> ByteString
+printDepPreferred cfg libd n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> rs)
+  where
+    r' = bool (fromMaybe (normDepRange r) (Map.lookup d (Map.fromList (preferredDeps cfg)))) (normDepRange r) (libd == d)
+    rs = bool [r'] [] (r' == "")
+
+printDepsPreferred :: Config -> ByteString -> DepAlignment -> [Dep] -> [ByteString]
+printDepsPreferred cfg libd DepUnaligned ds = printDepPreferred cfg libd 1 <$> ds
+printDepsPreferred cfg libd DepAligned ds = zipWith (printDepPreferred cfg libd) ns ds
+  where
+    ls = BS.length . dep <$> ds
+    ns = (\x -> maximum ls - x + 1) <$> ls
+
+parseDepFL :: FieldLine ann -> Either ByteString Dep
+parseDepFL fl = uncurry Dep <$> runParserEither depP (view fieldLine' fl)
+
+-- * sorting field lines
+
+sortFieldLinesFor :: [ByteString] -> Field ann -> Field ann
+sortFieldLinesFor ns f@(Field n fl) =
+  Field n (bool fl (List.sortOn fieldLineBS fl) (view fieldName' f `elem` ns))
+sortFieldLinesFor ns (Section n a fss) = Section n a (sortFieldLinesFor ns <$> fss)
+
+-- | sorting fields, based on fieldOrdering configuration.
+--
+-- A secondary ordering is based on the first fieldline (for fields) or section args (for sections).
+sortFields:: Config -> [Field ann] -> [Field ann]
+sortFields cfg fs = overFields (List.sortOn (\f -> (fromMaybe 100 (Map.lookup (view fieldName' f) (Map.fromList $ fieldOrdering cfg)), name2 f))) fs
+
+name2 :: Field ann -> Maybe ByteString
+name2 (Field _ fl) = listToMaybe (fieldLineBS <$> fl)
+name2 (Section _ a _) = listToMaybe $ snd . view secArg' <$> a
+
+-- * Printing
+
+printCabalFields :: Config -> CabalFields -> ByteString
+printCabalFields cfg cf =
+  ( C.pack .
+    showFieldsIndent cfg fComment (const id) (indentN cfg) .
+    fmap (fmap (fmap C.unpack)) .
+    printFieldsComments $ view (#fields % fieldList) cf) <> C.unlines (view #endComment cf)
+  where
     fComment [] = NoComment
     fComment xs = CommentBefore xs
-
-adds :: Config -> [Field [a]] -> [Field [a]]
-adds rcfg x = foldl' (&) x $ overwrites rcfg & fmap (\(n, v, p) -> addField p (Field (Name [] n) [FieldLine [] v]))
-
-fixcommas' :: Config -> Field ann -> Field ann
-fixcommas' rcfg x = foldl' (&) x $ fixCommas rcfg & fmap (\(n, s) -> commas (hasName [n]) s)
-
-fixBuildDeps' :: Config -> ByteString -> Field ann -> Field ann
-fixBuildDeps' rcfg libdep (Field n@(Name _ "build-depends") fls) = Field n (fixBDLines libdep (depAlignment rcfg) fls)
-fixBuildDeps' _ _ f@(Field _ _) = f
-fixBuildDeps' rcfg libdep (Section n a fss) = Section n a (fixBuildDeps' rcfg libdep <$> fss)
-
-fixBDLines :: ByteString -> DepAlignment -> [FieldLine ann] -> [FieldLine ann]
-fixBDLines libdep align fls = fls'
-  where
-    deps = parseDepFL <$> fls
-    pds = (", " <>) <$> printDepsPreferred libdep align deps
-    fls' = zipWith setValueFL fls pds
-
-parseDepFL :: FieldLine ann -> Dep
-parseDepFL (FieldLine _ fl) = uncurry Dep $ runParser_ depP fl
-
-setValueFL :: FieldLine ann -> ByteString -> FieldLine ann
-setValueFL (FieldLine ann _) = FieldLine ann
-
-getCabalFiles :: FilePath -> IO [(FilePath, ByteString)]
-getCabalFiles dir =
-  getDirectoryContents dir
-    >>= ( \fs ->
-            mapM (BS.readFile . (dir <>)) fs & fmap (zip fs)
-        )
-      . filter (not . List.isPrefixOf ".")
-
-getCabalFile :: FilePath -> IO ByteString
-getCabalFile = BS.readFile
-
-cabalFixFile :: FilePath -> Config -> IO ()
-cabalFixFile fp cfg = do
-  bs <- getCabalFile fp
-  BS.writeFile fp (cabalFix cfg bs)
-
-toFields :: ByteString -> [Field Position]
-toFields bs = either (error . show) id $ readFields bs
-
--- | Unification of field and section names
-name :: Field a -> ByteString
-name (Field (Name _ n) _) = n
-name (Section (Name _ n) _ _) = n
-
-
--- | section deconstruction
-sec :: FieldName -> Field ann -> Maybe ([SectionArg ann], [Field ann])
-sec f (Section (Name _ n) sargs fs) = bool Nothing (Just (sargs, fs)) (f == n)
-sec _ (Field _ _) = Nothing
-
--- | SectionArg name
-secName :: SectionArg a -> (ByteString, ByteString)
-secName (SecArgName _ n) = ("name", n)
-secName (SecArgStr _ n) = ("str", n)
-secName (SecArgOther _ n) = ("other", n)
 
 printFieldsComments :: [Field [ByteString]] -> [PrettyField [ByteString]]
 printFieldsComments =
   runIdentity
     . genericFromParsecFields
-      (Identity .: prettyFieldLines')
-      (Identity .: prettySectionArgs')
+      (Identity .: prettyFieldLines)
+      (Identity .: prettySectionArgs)
   where
     (.:) :: (a -> b) -> (c -> d -> a) -> (c -> d -> b)
     (f .: g) x y = f (g x y)
 
 -- | Used in 'fromParsecFields'.
-prettyFieldLines' :: FieldName -> [FieldLine [ByteString]] -> PP.Doc
-prettyFieldLines' _ fls =
+prettyFieldLines :: FieldName -> [FieldLine [ByteString]] -> PP.Doc
+prettyFieldLines _ fls =
   PP.vcat $
     mconcat $
       [ PP.text . fromUTF8BS <$> cs <> [bs]
@@ -253,45 +522,16 @@ prettyFieldLines' _ fls =
       ]
 
 -- | Used in 'fromParsecFields'.
-prettySectionArgs' :: FieldName -> [SectionArg [ByteString]] -> [PP.Doc]
-prettySectionArgs' _ =
+prettySectionArgs :: FieldName -> [SectionArg [ByteString]] -> [PP.Doc]
+prettySectionArgs _ =
   fmap $
     mconcat . \case
       SecArgName cs bs -> showToken . fromUTF8BS <$> cs <> [bs]
       SecArgStr cs bs -> showToken . fromUTF8BS <$> cs <> [bs]
       SecArgOther cs bs -> PP.text . fromUTF8BS <$> cs <> [bs]
 
-convertFreeText :: [ByteString] -> Field Position -> Field Position
-convertFreeText freeTexts f@(Field n fls) = bool f (Field n (convertToFreeText fls)) (hasName freeTexts f)
-convertFreeText freeTexts (Section n a fss) = Section n a (convertFreeTexts freeTexts fss)
-
-convertFreeTexts :: [ByteString] -> [Field Position] -> [Field Position]
-convertFreeTexts freeTexts fs = snd $ foldl' step (Nothing, []) fs
-  where
-    step :: (Maybe (Field Position), [Field Position]) -> Field Position -> (Maybe (Field Position), [Field Position])
-    step (descFP, res) nextFP
-      | isNothing descFP && hasName freeTexts nextFP = (Just $ convertFreeText freeTexts nextFP, res)
-      | isNothing descFP && not (hasName freeTexts nextFP) = (Nothing, res <> [nextFP])
-      | isJust descFP && hasName freeTexts nextFP = (Just $ convertFreeText freeTexts nextFP, res <> [descFP'])
-      | isJust descFP && not (hasName freeTexts nextFP) = (Nothing, res <> [descFP', nextFP])
-      where
-        (Just (Field _ ((FieldLine (Position c0 _) _) : _))) = descFP
-        (Just (Field n fls)) = descFP
-        c1 = firstCol nextFP
-        (FieldLine ann fls') = head fls
-        descFP' = Field n [FieldLine ann (fls' <> C.pack (replicate (c1 - c0 - length (C.lines fls')) '\n'))]
-
-hasName :: [ByteString] -> Field ann -> Bool
-hasName freeTexts (Field (Name _ n) _) = n `elem` freeTexts
-hasName _ _ = False
-
-firstCol :: Field Position -> Int
-firstCol (Field (Name (Position c _) _) _) = c
-firstCol (Section (Name (Position c _) _) _ _) = c
-
-
 -- | 'showFields' with user specified indentation.
-showFields'' ::
+showFieldsIndent ::
   Config ->
   -- | Convert an annotation to lined to preceed the field or section.
   (ann -> CommentPosition) ->
@@ -302,7 +542,7 @@ showFields'' ::
   -- | Fields/sections to show.
   [PrettyField ann] ->
   String
-showFields'' rcfg rann post n = unlines . renderFields rcfg (Opts rann indent post)
+showFieldsIndent cfg rann post n = unlines . renderFields cfg (Opts rann indent post)
   where
     -- few hardcoded, "unrolled"  variants.
     indent
@@ -325,12 +565,12 @@ data Opts ann = Opts
   }
 
 renderFields :: Config -> Opts ann -> [PrettyField ann] -> [String]
-renderFields rcfg opts fields = flattenBlocks blocks
+renderFields cfg opts fields = flattenBlocks blocks
   where
     len = maxNameLength 0 fields
     blocks =
       filter (not . null . _contentsBlock) $ -- empty blocks cause extra newlines #8236
-        map (renderField rcfg opts len) fields
+        map (renderField cfg opts len) fields
 
     maxNameLength !acc [] = acc
     maxNameLength !acc (PrettyField _ name _ : rest) = maxNameLength (max acc (BS.length name)) rest
@@ -343,15 +583,7 @@ data Block = Block
     _afterBlock :: Margin,
     _contentsBlock :: [String]
   }
-  deriving (Show, Eq, Read)
-
-data Margin = Margin | NoMargin
-  deriving (Eq, Show, Read)
-
--- | Collapse margins, any margin = margin
-instance Semigroup Margin where
-  NoMargin <> NoMargin = NoMargin
-  _ <> _ = Margin
+  deriving (Show, Eq, Read, Generic)
 
 flattenBlocks :: [Block] -> [String]
 flattenBlocks = go0
@@ -366,14 +598,12 @@ flattenBlocks = go0
           | surr' <> before == Margin = ("" :)
           | otherwise = id
 
-data ValueAlignment = ValueAligned | ValueUnaligned deriving (Eq, Show, Read)
-
 lines_ :: String -> [String]
 lines_ [] = []
 lines_ s = lines s <> bool [] [""] ((== '\n') . last $ s)
 
 renderField :: Config -> Opts ann -> Int -> PrettyField ann -> Block
-renderField rcfg (Opts rann indent post) fw (PrettyField ann name doc) =
+renderField cfg (Opts rann indent post) fw (PrettyField ann name doc) =
   Block before after content
   where
     content = case comments of
@@ -385,13 +615,13 @@ renderField rcfg (Opts rann indent post) fw (PrettyField ann name doc) =
       CommentBefore [] -> NoMargin
       CommentAfter [] -> NoMargin
       NoComment -> NoMargin
-      _ -> commentMargin rcfg
+      _ -> commentMargin cfg
 
     (lines', after) = case lines_ narrow of
       [] -> ([name' ++ ":"], NoMargin)
       [singleLine]
-        | length singleLine < narrowN rcfg ->
-            ([name' ++ ": " ++ replicate (bool 0 (fw - length name') (valueAligned rcfg == ValueAligned)) ' ' ++ narrow], NoMargin)
+        | length singleLine < narrowN cfg ->
+            ([name' ++ ": " ++ replicate (bool 0 (fw - length name' + (valueAlignGap cfg - 1)) (valueAligned cfg == ValueAligned)) ' ' ++ narrow], NoMargin)
       _ -> ((name' ++ ":") : map indent (lines_ (PP.render doc)), NoMargin)
 
     name' = fromUTF8BS name
@@ -399,11 +629,11 @@ renderField rcfg (Opts rann indent post) fw (PrettyField ann name doc) =
 
     narrowStyle :: PP.Style
     narrowStyle = PP.style {PP.lineLength = PP.lineLength PP.style - fw}
-renderField rcfg opts@(Opts rann indent post) _ (PrettySection ann name args fields) =
-  Block (sectionMargin rcfg) (sectionMargin rcfg) $
+renderField cfg opts@(Opts rann indent post) _ (PrettySection ann name args fields) =
+  Block (sectionMargin cfg) (sectionMargin cfg) $
     attachComments
       (post ann [PP.render $ PP.hsep $ PP.text (fromUTF8BS name) : args])
-      ++ map indent (renderFields rcfg opts fields)
+      ++ map indent (renderFields cfg opts fields)
   where
     attachComments content = case rann ann of
       CommentBefore cs -> cs ++ content
@@ -411,109 +641,57 @@ renderField rcfg opts@(Opts rann indent post) _ (PrettySection ann name args fie
       NoComment -> content
 renderField _ _ _ PrettyEmpty = Block NoMargin NoMargin mempty
 
+-- * parsing
+
+parseCabalFields :: Config -> ByteString -> Either ByteString CabalFields
+parseCabalFields cfg bs = case readFields bs of
+  Left err -> Left $ C.pack (show err)
+  Right fps -> (\(fs,ec) -> Right (CabalFields (V.fromList fs) ec)) $
+    foldl' (&) (fmap (fmap (const [])) fs, []) (uncurry addComment <$> cfs)
+    where
+    fs = convertFreeTexts (view #freeTexts cfg) fps
+    cs = extractComments bs
+    pt = Map.toList $ makePositionTree fs
+    cfs = fmap (first (fmap snd)) (first (fmap (pt List.!!) . (\x -> List.findIndex (\e -> fst e > x) pt)) <$> cs)
+
+convertFreeText :: [ByteString] -> Field Position -> Field Position
+convertFreeText freeTexts f@(Field n fls) = bool f (Field n (convertToFreeText fls)) (inNameList freeTexts f)
+convertFreeText freeTexts (Section n a fss) = Section n a (convertFreeTexts freeTexts fss)
+
+convertFreeTexts :: [ByteString] -> [Field Position] -> [Field Position]
+convertFreeTexts freeTexts fs = snd $ foldl' step (Nothing, []) fs
+  where
+    step :: (Maybe (Field Position), [Field Position]) -> Field Position -> (Maybe (Field Position), [Field Position])
+    step (descFP, res) nextFP
+      | isNothing descFP && inNameList freeTexts nextFP = (Just $ convertFreeText freeTexts nextFP, res)
+      | isNothing descFP && not (inNameList freeTexts nextFP) = (Nothing, res <> [nextFP])
+      | isJust descFP && inNameList freeTexts nextFP = (Just $ convertFreeText freeTexts nextFP, res <> [descFP'])
+      | isJust descFP && not (inNameList freeTexts nextFP) = (Nothing, res <> [descFP', nextFP])
+      where
+        (Just (Field _ ((FieldLine (Position c0 _) _) : _))) = descFP
+        (Just (Field n fls)) = descFP
+        c1 = firstCol nextFP
+        (FieldLine ann fls') = head fls
+        descFP' = Field n [FieldLine ann (fls' <> C.pack (replicate (c1 - c0 - length (C.lines fls')) '\n'))]
+
+firstCol :: Field Position -> Int
+firstCol (Field (Name (Position c _) _) _) = c
+firstCol (Section (Name (Position c _) _) _ _) = c
+
 convertToFreeText :: [FieldLine Position] -> [FieldLine Position]
 convertToFreeText [] = []
 convertToFreeText ((FieldLine (Position r0 c0) bs0) : xs) = [FieldLine (Position r0 c0) x]
   where
     x = mconcat $ snd $ foldl' (\(r', xs') (FieldLine (Position r _) bs) -> (r, xs' <> replicate (r - r') "\n" <> [bs])) (r0, [bs0]) xs
 
-stripComma :: FieldLine ann -> FieldLine ann
-stripComma (FieldLine n bs) =
-  FieldLine
-    n
-    (fromMaybe (fromMaybe bs (C.stripSuffix "," bs)) (C.stripPrefix ", " bs))
-
-addPrefixComma :: FieldLine ann -> FieldLine ann
-addPrefixComma (FieldLine n bs) = FieldLine n (", " <> bs)
-
-addPostfixComma :: FieldLine ann -> FieldLine ann
-addPostfixComma (FieldLine n bs) = FieldLine n (bs <> ",")
-
-commas :: (Field ann -> Bool) -> CommaStyle -> Field ann -> Field ann
-commas p NoCommas f = noCommas p f
-commas p PrefixCommas f = prefixCommas p f
-commas p PostfixCommas f = postfixCommas p f
-commas _ FreeformCommas f = f
-
-prefixCommas :: (Field ann -> Bool) -> Field ann -> Field ann
-prefixCommas p f@(Field n fs) = bool f (Field n (addPrefixComma . stripComma <$> fs)) (p f)
-prefixCommas p (Section n a fss) = Section n a (prefixCommas p <$> fss)
-
-postfixCommas :: (Field ann -> Bool) -> Field ann -> Field ann
-postfixCommas p f@(Field n fs) = bool f (Field n (addPostfixComma . stripComma <$> fs)) (p f)
-postfixCommas p (Section n a fss) = Section n a (postfixCommas p <$> fss)
-
-noCommas :: (Field ann -> Bool) -> Field ann -> Field ann
-noCommas p f@(Field n fs) = bool f (Field n (stripComma <$> fs)) (p f)
-noCommas p (Section n a fss) = Section n a (noCommas p <$> fss)
-
-isBlankField :: Field ann -> Bool
-isBlankField (Field _ fs) = null fs
-isBlankField (Section _ _ fss) = null fss
-
-addField :: AddPolicy -> Field ann -> [Field ann] -> [Field ann]
-addField p f fs = case p of
-  AddReplace -> notsames <> [f]
-  AddAppend -> fs <> [f]
-  AddIfNotExisting -> bool fs (fs <> [f]) (null sames)
-  where
-    sames = filter ((name f ==) . name) fs
-    notsames = filter ((name f /=) . name) fs
-
-data Dep = Dep {dep :: ByteString, depRange :: ByteString} deriving (Show, Ord, Eq, Generic)
-
-normDepRange :: ByteString -> ByteString
-normDepRange dr = (maybe dr (C.pack . show . pretty) . (simpleParsecBS :: ByteString -> Maybe VersionRange)) dr
-
-data DepAlignment = DepAligned | DepUnaligned deriving (Eq, Show, Read)
-
-printDepPreferred :: ByteString -> Int -> Dep -> ByteString
-printDepPreferred libd n (Dep d r) = C.intercalate (C.pack $ replicate n ' ') ([d] <> rs)
-  where
-    -- FIXME: why is this defaultPreferredDeps
-    r' = bool (normDepRange r) (fromMaybe (normDepRange r) (Map.lookup d (Map.fromList defaultPreferredDeps))) (libd == d)
-    rs = bool [r'] [] (r' == "")
-
-printDepsPreferred :: ByteString -> DepAlignment -> [Dep] -> [ByteString]
-printDepsPreferred libd DepUnaligned ds = printDepPreferred libd 1 <$> ds
-printDepsPreferred libd DepAligned ds = zipWith (printDepPreferred libd) ns ds
-  where
-    ls = BS.length . dep <$> ds
-    ns = (\x -> maximum ls - x + 1) <$> ls
-
-defaultSortFields :: Config -> [Field ann] -> [Field ann]
-defaultSortFields cfg fs = List.sortOn (\f -> (fromMaybe 100 (Map.lookup (name f) (Map.fromList $ fieldOrdering cfg)), name2 f)) (sortInnerFields cfg <$> fs)
-
-name2 :: Field ann -> Maybe ByteString
-name2 (Field _ fl) = listToMaybe (fieldLineBS <$> fl)
-name2 (Section _ a _) = listToMaybe $ snd . secName <$> a
-
-sortInnerFields :: Config -> Field ann -> Field ann
-sortInnerFields _ f@(Field _ _) = f
-sortInnerFields cfg (Section n a fss) = Section n a (defaultSortFields cfg $ sortInnerFields cfg <$> fss)
-
-sortFieldLinesFor :: [ByteString] -> Field ann -> Field ann
-sortFieldLinesFor ns f@(Field n fl) =
-  Field n (bool fl (List.sortOn fieldLineBS fl) (name f `elem` ns))
-sortFieldLinesFor ns (Section n a fss) = Section n a (sortFieldLinesFor ns <$> fss)
-
--- from CabalFmt.Comments
-
-newtype Comments = Comments [BS.ByteString]
-  deriving stock (Show)
-  deriving newtype (Semigroup, Monoid)
-
-unComments :: Comments -> [BS.ByteString]
-unComments (Comments cs) = cs
-
-extractComments :: BS.ByteString -> [(Int, Comments)]
+extractComments :: BS.ByteString -> [(Int, Comment)]
 extractComments = go . zip [1 ..] . map (BS.dropWhile isSpace8) . C.lines
   where
-    go :: [(Int, BS.ByteString)] -> [(Int, Comments)]
+    go :: [(Int, BS.ByteString)] -> [(Int, Comment)]
     go [] = []
     go ((n, bs) : rest)
       | isComment bs = case span ((isComment .|| BS.null) . snd) rest of
-          (h, t) -> (n, Comments $ bs : map snd h) : go t
+          (h, t) -> (n, bs : map snd h) : go t
       | otherwise = go rest
 
     (f .|| g) x = f x || g x
@@ -523,11 +701,6 @@ extractComments = go . zip [1 ..] . map (BS.dropWhile isSpace8) . C.lines
     isComment :: BS.ByteString -> Bool
     isComment = BS.isPrefixOf "--"
 
--------------------------------------------------------------------------------
--- FieldPath
--------------------------------------------------------------------------------
-
--- | Paths input paths. Essentially a list of offsets. Own type ofr safety.
 data FieldPath
   = End
   | Nth Int FieldPath -- nth field
@@ -578,69 +751,4 @@ addc comments (x : xs) tag fs = take x fs <> [f'] <> drop (x + 1) fs
   where
     (Section n a fss) = (List.!!) fs x
     f' = Section n a (addc comments xs tag fss)
-
-parseFieldsAndComments :: [ByteString] -> ByteString -> ([Field [ByteString]], [ByteString])
-parseFieldsAndComments freeTexts bs = foldl' (&) (fmap (fmap (const [])) fs, []) (uncurry addComment <$> cfs)
-  where
-    fs = convertFreeTexts freeTexts (toFields bs)
-    cs = extractComments bs
-    pt = Map.toList $ makePositionTree fs
-    cfs = fmap (bimap (fmap snd) unComments) (first (fmap (pt List.!!) . (\x -> List.findIndex (\e -> fst e > x) pt)) <$> cs)
-
-isUnchangedList :: [Edit EditExpr] -> Bool
-isUnchangedList xs = all isCpy xs && all isUnchangedExpr (mapMaybe cpy xs)
-
-isCpy :: Edit a -> Bool
-isCpy (Cpy _) = True
-isCpy _ = False
-
-cpy :: Edit a -> Maybe a
-cpy (Cpy a) = Just a
-cpy _ = Nothing
-
-isUnchangedEdit :: Edit EditExpr -> Bool
-isUnchangedEdit (Cpy e) = isUnchangedExpr e
-isUnchangedEdit _ = False
-
-isUnchangedExpr :: EditExpr -> Bool
-isUnchangedExpr e = isUnchangedList $ getList e
-
-getList :: EditExpr -> [Edit EditExpr]
-getList (EditApp _ xs) = xs
-getList (EditRec _ m) = snd <$> O.toList m
-getList (EditLst xs) = xs
-getList (EditExp _) = []
-
-filterChangedExprs :: EditExpr -> Maybe EditExpr
-filterChangedExprs (EditApp n xs) =
-  case filter (not . isUnchangedEdit) (filterChangedEdits xs) of
-    [] -> Nothing
-    xs' -> Just $ EditApp n xs'
-filterChangedExprs (EditRec n m) =
-  case filterChangedEditMap (O.fromList $ filter (not . isUnchangedEdit . snd) (O.toList m)) of
-    Nothing -> Nothing
-    Just m' -> Just (EditRec n m')
-filterChangedExprs (EditLst xs) =
-  case filter (not . isUnchangedEdit) (filterChangedEdits xs) of
-    [] -> Nothing
-    xs' -> Just (EditLst xs')
-filterChangedExprs (EditExp _) = Nothing
-
-filterChangedEdit :: Edit EditExpr -> Maybe (Edit EditExpr)
-filterChangedEdit (Cpy a) = Cpy <$> filterChangedExprs a
-filterChangedEdit x = Just x
-
-filterChangedEdit' :: (f, Edit EditExpr) -> Maybe (f, Edit EditExpr)
-filterChangedEdit' (f, e) = (f,) <$> filterChangedEdit e
-
-filterChangedEdits :: [Edit EditExpr] -> [Edit EditExpr]
-filterChangedEdits = mapMaybe filterChangedEdit
-
-filterChangedEditMap :: O.OMap T.FieldName (Edit EditExpr) -> Maybe (O.OMap T.FieldName (Edit EditExpr))
-filterChangedEditMap m = case xs' of
-  [] -> Nothing
-  xs'' -> Just $ O.fromList xs''
-  where
-    xs = O.toList m
-    xs' = mapMaybe filterChangedEdit' xs
 

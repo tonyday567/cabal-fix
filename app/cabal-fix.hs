@@ -4,9 +4,9 @@
 module Main where
 
 import CabalFix
-    ( defaultConfig, getCabalFile, cabalFix, cabalFixFile )
+    ( defaultConfig, Config, fixCabalFields, printCabalFields, parseCabalFields, fixCabalFile )
 import Data.TreeDiff
-import MarkupParse.Patch
+import CabalFix.Patch
 import Options.Applicative
 import System.Directory
 import System.FilePath
@@ -15,25 +15,35 @@ import Data.Bool
 import Text.Pretty.Simple
 import Data.Text.Lazy.IO qualified as Text
 import GHC.Generics
+import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as C
+import Control.Monad
 
-data FixType = FixInplace | FixCheck deriving (Generic, Eq, Show)
+data CommandType = FixInplace | FixCheck | GenerateConfig deriving (Generic, Eq, Show)
 
 data Options = Options
-  { fixType :: FixType,
-    configFile :: FilePath,
-    genConfigFile :: Bool
+  { commandType :: CommandType,
+    projectDir :: FilePath,
+    configFile :: FilePath
   }
   deriving (Eq, Show)
 
 defaultOptions :: Options
-defaultOptions = Options FixCheck "cabal-fix.config" False
+defaultOptions = Options FixCheck "." "cabal-fix.config"
+
+parseCommand :: Parser CommandType
+parseCommand =
+  subparser $
+    command "inplace" (info (pure FixInplace) (progDesc "fix cabal file inplace"))
+      <> command "check" (info (pure FixCheck) (progDesc "check cabal file"))
+      <> command "genConfig" (info (pure GenerateConfig) (progDesc "generate config file"))
 
 parseOptions :: Parser Options
 parseOptions =
   Options <$>
-    (bool FixCheck FixInplace <$> switch (long "inplace" <> short 'i' <> help "fix the cabal file inplace")) <*>
-    option str (Options.Applicative.value (configFile defaultOptions) <> long "config" <> short 'c' <> help "config file") <*>
-    switch (long "gen" <> short 'g' <> help "generate config file")
+    parseCommand <*>
+    option str (Options.Applicative.value (projectDir defaultOptions) <> long "directory" <> short 'd' <> help "project directory") <*>
+    option str (Options.Applicative.value (configFile defaultOptions) <> long "config" <> short 'c' <> help "config file")
 
 infoOptions :: ParserInfo Options
 infoOptions =
@@ -44,21 +54,34 @@ infoOptions =
 main :: IO ()
 main = do
   o <- execParser infoOptions
-  bool (runCabalFix o) (Text.writeFile (configFile o) (pShowNoColor defaultConfig)) (genConfigFile o)
+  runCabalFix o
 
 runCabalFix :: Options -> IO ()
 runCabalFix o = do
+  case commandType o of
+    GenerateConfig ->
+      Text.writeFile (configFile o) (pShowNoColor defaultConfig)
+    FixInplace -> do
+      cfg <- getConfig o
+      fp <- getCabalFile o
+      b <- fixCabalFile fp cfg
+      unless b (putStrLn "parsing failure")
+    FixCheck -> do
+      cfg <- getConfig o
+      fp <- getCabalFile o
+      bs <- BS.readFile fp
+      let bs' = printCabalFields cfg . fixCabalFields cfg <$> parseCabalFields cfg bs
+      print $ fmap ansiWlBgEditExpr . patch (C.lines bs) . C.lines <$> bs'
+
+getConfig :: Options -> IO Config
+getConfig o = do
   configExists <- doesFileExist (configFile o)
-  cfg <- bool (pure defaultConfig) (read <$> readFile (configFile o)) configExists
-  d <- getCurrentDirectory
-  let fp = takeBaseName d <> ".cabal"
-  exists <- doesFileExist fp
-  case exists of
-    False -> putStrLn "cabal file not found"
-    True -> do
-      case fixType o of
-        FixInplace -> cabalFixFile fp cfg
-        FixCheck -> do
-          bs <- getCabalFile fp
-          let bs' = cabalFix cfg bs
-          print $ ansiWlEditExpr <$> patch bs bs'
+  bool (pure defaultConfig) (read <$> readFile (configFile o)) configExists
+
+getCabalFile :: Options -> IO FilePath
+getCabalFile o = do
+  fs <- getDirectoryContents (projectDir o)
+  case filter ((==".cabal") . takeExtension) fs of
+    [] -> error "No .cabal file found"
+    [c] -> pure (projectDir o </> c)
+    _ -> error "multiple .cabal files found"

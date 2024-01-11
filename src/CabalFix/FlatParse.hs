@@ -20,6 +20,9 @@ module CabalFix.FlatParse
     -- * Parsers
     depP,
     untilP,
+    nota,
+    ws_,
+    ws,
   )
 where
 
@@ -35,17 +38,13 @@ import Prelude hiding (replicate)
 
 -- $setup
 -- >>> :set -XTemplateHaskell
--- >>> import MarkupParse.FlatParse
+-- >>> :set -XOverloadedStrings
+-- >>> import CabalFix.FlatParse
 -- >>> import FlatParse.Basic
 
 
 -- | Run a Parser, throwing away leftovers. Nothing on 'Fail' or 'Err'.
 --
--- >>> runParserMaybe ws "x"
--- Nothing
---
--- >>> runParserMaybe ws " x"
--- Just ' '
 runParserMaybe :: Parser e a -> ByteString -> Maybe a
 runParserMaybe p b = case runParser p b of
   OK r _ -> Just r
@@ -54,8 +53,6 @@ runParserMaybe p b = case runParser p b of
 
 -- | Run a Parser, throwing away leftovers. Returns Left on 'Fail' or 'Err'.
 --
--- >>> runParserEither ws " x"
--- Right ' '
 runParserEither :: (IsString e) => Parser e a -> ByteString -> Either e a
 runParserEither p bs = case runParser p bs of
   Err e -> Left e
@@ -64,26 +61,10 @@ runParserEither p bs = case runParser p bs of
 
 -- | Warnings covering leftovers, 'Err's and 'Fail'
 --
--- >>> runParserWarn ws " x"
--- These (ParserLeftover "x") ' '
---
--- >>> runParserWarn ws "x"
--- This ParserUncaught
---
--- >>> runParserWarn (ws `cut` "no whitespace") "x"
--- This (ParserError "no whitespace")
 data ParserWarning = ParserLeftover ByteString | ParserError ByteString | ParserUncaught deriving (Eq, Show, Ord, Generic, NFData)
 
 -- | Run parser, returning leftovers and errors as 'ParserWarning's.
 --
--- >>> runParserWarn ws " "
--- That ' '
---
--- >>> runParserWarn ws "x"
--- This ParserUncaught
---
--- >>> runParserWarn ws " x"
--- These (ParserLeftover "x") ' '
 runParserWarn :: Parser ByteString a -> ByteString -> These ParserWarning a
 runParserWarn p bs = case runParser p bs of
   Err e -> This (ParserError e)
@@ -127,6 +108,22 @@ ws_ =
    )
 {-# INLINE ws_ #-}
 
+-- | \\n \\t \\f \\r and space
+isWhitespace :: Char -> Bool
+isWhitespace ' ' = True -- \x20 space
+isWhitespace '\x0a' = True -- \n linefeed
+isWhitespace '\x09' = True -- \t tab
+isWhitespace '\x0c' = True -- \f formfeed
+isWhitespace '\x0d' = True -- \r carriage return
+isWhitespace _ = False
+{-# INLINE isWhitespace #-}
+
+-- | single whitespace
+--
+-- >>> runParser ws " \nx"
+-- OK ' ' "\nx"
+ws :: Parser e Char
+ws = satisfy isWhitespace
 
 -- | Parse whilst not a specific character
 --

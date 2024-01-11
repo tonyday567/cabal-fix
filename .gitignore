@@ -7,3 +7,6 @@ cabal.project.local*
 .ghc.environment.*
 /.hkgr/
 /xyzzy/
+/minimal/
+/other/new.cabal
+/other/old.cabal
