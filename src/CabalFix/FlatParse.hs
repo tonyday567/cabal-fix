@@ -42,9 +42,7 @@ import Prelude hiding (replicate)
 -- >>> import CabalFix.FlatParse
 -- >>> import FlatParse.Basic
 
-
 -- | Run a Parser, throwing away leftovers. Nothing on 'Fail' or 'Err'.
---
 runParserMaybe :: Parser e a -> ByteString -> Maybe a
 runParserMaybe p b = case runParser p b of
   OK r _ -> Just r
@@ -52,7 +50,6 @@ runParserMaybe p b = case runParser p b of
   Err _ -> Nothing
 
 -- | Run a Parser, throwing away leftovers. Returns Left on 'Fail' or 'Err'.
---
 runParserEither :: (IsString e) => Parser e a -> ByteString -> Either e a
 runParserEither p bs = case runParser p bs of
   Err e -> Left e
@@ -60,11 +57,9 @@ runParserEither p bs = case runParser p bs of
   Fail -> Left "uncaught parse error"
 
 -- | Warnings covering leftovers, 'Err's and 'Fail'
---
 data ParserWarning = ParserLeftover ByteString | ParserError ByteString | ParserUncaught deriving (Eq, Show, Ord, Generic, NFData)
 
 -- | Run parser, returning leftovers and errors as 'ParserWarning's.
---
 runParserWarn :: Parser ByteString a -> ByteString -> These ParserWarning a
 runParserWarn p bs = case runParser p bs of
   Err e -> This (ParserError e)
@@ -134,7 +129,7 @@ nota c = withSpan (skipMany (satisfy (/= c))) (\() s -> unsafeSpanToByteString s
 {-# INLINE nota #-}
 
 untilP :: Char -> Parser e ByteString
-untilP c = nota c <* satisfy (==c)
+untilP c = nota c <* satisfy (== c)
 
 prefixComma :: Parser e ()
 prefixComma = $(char ',') >> ws_

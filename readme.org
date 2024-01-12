@@ -214,6 +214,31 @@ Config
     }
 #+end_example
 
+* Usage
+
+#+begin_src haskell-ng :results output
+:set -XOverloadedStrings
+:set -XOverloadedLabels
+:set -Wno-incomplete-uni-patterns
+:set -Wno-name-shadowing
+import CabalFix
+import Optics.Extra
+import Data.ByteString.Char8 qualified as C
+bs = minimalExampleBS
+cfg = minimalConfig
+(Just cf) = preview (cabalFields' cfg) bs
+#+end_src
+
+#+RESULTS:
+
+#+begin_src haskell-ng :results output
+cf & over (#fields % fieldList') (take 2) & review (cabalFields' cfg) & C.putStr
+#+end_src
+
+#+RESULTS:
+: cabal-version: 3.0
+: name:          minimal
+
 * Imports
 #+begin_src haskell-ng :results output
 :r
@@ -249,7 +274,6 @@ import Text.Pretty.Simple
 
 * cabal init
 
-
 ** minimal
 
 A minimal =cabal init=
@@ -270,21 +294,33 @@ mkdir minimal && cd minimal && cabal init --minimal --simple --overwrite --lib -
 [Log] Creating fresh file minimal.cabal...
 [Warning] No synopsis given. You should edit the .cabal file and add one.
 [Info] You may want to edit the .cabal file and add a Description field.
+
 #+end_example
 
 #+begin_src sh :results output
-cabal-fix check -d "minimal" -c "other/init.config"
+cabal-fix check -d "minimal" -c "other/minimal.config"
 #+end_src
 
 #+RESULTS:
-: Right (Just BS.concat
-:   [
-:     -"    default-language: GHC2021\n",
-:     -"    type:             exitcode-stdio-1.0\n",
-:     -"    hs-source-dirs:   test\n",
-:     +"    hs-source-dirs:   test\n",
-:     +"    default-language: GHC2021\n",
-:     +"    type:             exitcode-stdio-1.0\n"])
+#+begin_example
+Right (Just [
+  -"    build-depends:    base ^>=4.17.2.1",
+  +"    build-depends:    base >=4.17 && <5",
+  -"    default-language: GHC2021",
+  +"    main-is:          Main.hs",
+  -"    type:             exitcode-stdio-1.0",
+  +"    build-depends:",
+  -"    hs-source-dirs:   test",
+  +"        base    >=4.17 && <5,",
+  -"    main-is:          Main.hs",
+  +"        minimal",
+  -"    build-depends:",
+  +"    hs-source-dirs:   test",
+  -"        base ^>=4.17.2.1,",
+  +"    default-language: GHC2021",
+  -"        minimal",
+  +"    type:             exitcode-stdio-1.0"])
+#+end_example
 
 Using library:
 
@@ -296,7 +332,7 @@ Using library:
 import CabalFix
 import Text.Pretty.Simple
 bs <- BS.readFile "minimal/minimal.cabal"
-cfg <- read <$> readFile "other/init.config" :: IO Config
+cfg <- read <$> readFile "other/minimal.config" :: IO Config
 (Just cf) = preview (cabalFields' cfg) bs
 cf' = fixCabalFields cfg cf
 bs' = review (cabalFields' cfg) cf'
@@ -305,6 +341,27 @@ BS.writeFile "other/new.cabal" bs'
 #+end_src
 
 #+RESULTS:
+
+** simple
+
+#+begin_src sh :results output
+mkdir simple && cd simple && cabal init --simple --overwrite --lib --tests --language=GHC2021 --license=BSD-2-Clause  -p simple
+#+end_src
+
+#+RESULTS:
+#+begin_example
+[Log] Using cabal specification: 3.0
+[Log] Creating fresh file LICENSE...
+[Log] Creating fresh file CHANGELOG.md...
+[Log] Creating fresh directory ./src...
+[Log] Creating fresh file src/MyLib.hs...
+[Log] Creating fresh directory ./test...
+[Log] Creating fresh file test/Main.hs...
+[Log] Creating fresh file simple.cabal...
+[Warning] No synopsis given. You should edit the .cabal file and add one.
+[Info] You may want to edit the .cabal file and add a Description field.
+
+#+end_example
 
 ** Trailing debug
 
@@ -340,9 +397,8 @@ the prism laws:
 :set -Wno-name-shadowing
 import CabalFix
 import Text.Pretty.Simple
-bs <- BS.readFile "minimal/minimal.cabal"
-cfg <- read <$> readFile "other/init.config" :: IO Config
--- cfg = defaultConfig
+bs = minimalExampleBS
+cfg = minimalConfig
 (Just cf) = preview (cabalFields' cfg) bs
 bs' = review (cabalFields' cfg) cf
 (Just cf') = preview (cabalFields' cfg) bs'
@@ -350,21 +406,35 @@ cfFixed = fixCabalFields cfg cf
 bsFixed = review (cabalFields' cfg) cfFixed
 #+end_src
 
+#+RESULTS:
+
 #+begin_src haskell-ng :results output
-import MarkupParse.Patch
+import CabalFix.Patch
 import Data.TreeDiff
 :set -Wno-type-defaults
-fmap ansiWlEditExpr $ patch (C.lines bs) (C.lines bsFixed)
+fmap ansiWlBgEditExpr $ patch (C.lines bs) (C.lines bsFixed)
 #+end_src
 
 #+RESULTS:
-: Just [
-:   -"    default-language: GHC2021",
-:   -"    type:             exitcode-stdio-1.0",
-:   -"    hs-source-dirs:   test",
-:   +"    hs-source-dirs:   test",
-:   +"    default-language: GHC2021",
-:   +"    type:             exitcode-stdio-1.0"]
+#+begin_example
+Just [
+  -"    build-depends:    base ^>=4.17.2.1",
+  +"    build-depends:    base >=4.17 && <5",
+  -"    default-language: GHC2021",
+  +"    main-is:          Main.hs",
+  -"    type:             exitcode-stdio-1.0",
+  +"    build-depends:",
+  -"    hs-source-dirs:   test",
+  +"        base    >=4.17 && <5,",
+  -"    main-is:          Main.hs",
+  +"        minimal",
+  -"    build-depends:",
+  +"    hs-source-dirs:   test",
+  -"        base ^>=4.17.2.1,",
+  +"    default-language: GHC2021",
+  -"        minimal",
+  +"    type:             exitcode-stdio-1.0"]
+#+end_example
 
 ** printDepsPreferred deconstruction
 

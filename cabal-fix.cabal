@@ -121,6 +121,8 @@ library
         , these
         , tree-diff          >=0.3 && <0.4
         , vector
+        , string-interpolate
+
     exposed-modules:
         CabalFix
         CabalFix.Archive
@@ -143,4 +145,5 @@ executable cabal-fix
         , optparse-applicative >=0.17 && <0.19
         , pretty-simple
         , text
+        , string-interpolate
         , tree-diff            >=0.3 && <0.4

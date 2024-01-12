@@ -4,20 +4,26 @@
 module Main where
 
 import CabalFix
-    ( defaultConfig, Config, fixCabalFields, printCabalFields, parseCabalFields, fixCabalFile )
-import Data.TreeDiff
+  ( Config,
+    defaultConfig,
+    fixCabalFields,
+    fixCabalFile,
+    parseCabalFields,
+    printCabalFields,
+  )
 import CabalFix.Patch
+import Control.Monad
+import Data.Bool
+import Data.ByteString qualified as BS
+import Data.ByteString.Char8 qualified as C
+import Data.Text.Lazy.IO qualified as Text
+import Data.TreeDiff
+import GHC.Generics
 import Options.Applicative
 import System.Directory
 import System.FilePath
-import Prelude
-import Data.Bool
 import Text.Pretty.Simple
-import Data.Text.Lazy.IO qualified as Text
-import GHC.Generics
-import Data.ByteString qualified as BS
-import Data.ByteString.Char8 qualified as C
-import Control.Monad
+import Prelude
 
 data CommandType = FixInplace | FixCheck | GenerateConfig deriving (Generic, Eq, Show)
 
@@ -40,10 +46,10 @@ parseCommand =
 
 parseOptions :: Parser Options
 parseOptions =
-  Options <$>
-    parseCommand <*>
-    option str (Options.Applicative.value (projectDir defaultOptions) <> long "directory" <> short 'd' <> help "project directory") <*>
-    option str (Options.Applicative.value (configFile defaultOptions) <> long "config" <> short 'c' <> help "config file")
+  Options
+    <$> parseCommand
+    <*> option str (Options.Applicative.value (projectDir defaultOptions) <> long "directory" <> short 'd' <> help "project directory")
+    <*> option str (Options.Applicative.value (configFile defaultOptions) <> long "config" <> short 'c' <> help "config file")
 
 infoOptions :: ParserInfo Options
 infoOptions =
@@ -81,7 +87,7 @@ getConfig o = do
 getCabalFile :: Options -> IO FilePath
 getCabalFile o = do
   fs <- getDirectoryContents (projectDir o)
-  case filter ((==".cabal") . takeExtension) fs of
+  case filter ((== ".cabal") . takeExtension) fs of
     [] -> error "No .cabal file found"
     [c] -> pure (projectDir o </> c)
     _ -> error "multiple .cabal files found"

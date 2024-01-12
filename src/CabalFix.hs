@@ -1,46 +1,74 @@
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE OverloadedLabels #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE QuasiQuotes #-}
 {-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
-{-# OPTIONS_GHC -Wno-unused-matches #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
+{-# OPTIONS_GHC -Wno-unused-matches #-}
 
+-- | Tools to print, parse and fix cabal files, 'ByteString' and 'Field' lists.
 module CabalFix
-  ( Config (..),
+  ( -- * Usage
+    -- $usage
+
+    -- * Configuration
+    Config (..),
     defaultConfig,
     AddPolicy (..),
     CommaStyle (..),
+    CommaTrail (..),
     DepAlignment (..),
     ValueAlignment (..),
     Margin (..),
+
+    -- * CabalFields
     Comment,
-    CabalFixWarning,
     CabalFields (..),
     cabalFields',
-    parseCabalFields,
-    fixCabalFields,
-    printCabalFields,
-    fixCabalFile,
+    fieldList',
 
-    -- FIXME: working list
+    -- * Lenses
+    -- $lenses
     topfield',
     field',
     subfield',
     section',
+    secFields',
     fieldOrSection',
-    name',
+    overField,
+    overFields,
     pname,
     fieldLines',
     fieldName',
-    secArg',
+    secArgs',
+    secArgBS',
     fieldLine',
-)
+
+    -- * Parsing
+    parseCabalFields,
+
+    -- * Printing
+    printCabalFields,
+
+    -- * Fixes
+    fixCabalFields,
+    fixCabalFile,
+    fixesCommas,
+    addsFields,
+    addField,
+    fixBuildDeps,
+
+    -- * Examples
+    minimalExampleBS,
+    minimalConfig,
+  )
 where
 
-import CabalFix.FlatParse ( depP, runParserEither )
+import CabalFix.FlatParse (depP, runParserEither)
+import Control.Category ((>>>))
 import Control.Monad
 import Data.Bifunctor
 import Data.Bool
@@ -53,7 +81,10 @@ import Data.Functor.Identity
 import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
+import Data.String.Interpolate
 import Data.TreeDiff hiding (FieldName)
+import Data.TreeDiff.OMap
+import Data.Vector qualified as V
 import Distribution.Fields
 import Distribution.Fields.Field
 import Distribution.Parsec
@@ -61,14 +92,47 @@ import Distribution.Pretty
 import Distribution.Utils.Generic
 import Distribution.Version
 import GHC.Generics hiding (to)
+import Optics.Extra
 import Text.PrettyPrint qualified as PP
 import Prelude
-import Optics.Extra
-import Data.TreeDiff.OMap
-import Data.Vector qualified as V
-import Control.Category ((>>>))
 
--- | Configuration values for varius aspects of rendering a cabal file.
+-- $setup
+--
+-- >>> :set -XOverloadedStrings
+-- >>> :set -XOverloadedLabels
+-- >>> import CabalFix
+-- >>> import Optics.Extra
+-- >>> import Data.ByteString.Char8 qualified as C
+-- >>> import CabalFix.Patch
+-- >>> bs = minimalExampleBS
+-- >>> cfg = defaultConfig
+-- >>> (Just cf) = preview (cabalFields' cfg) bs
+-- >>> fs = cf & view (#fields % fieldList')
+-- >>> printCabalFields cfg (cf & over (#fields % fieldList') (take 4)) & C.putStr
+-- cabal-version: 3.0
+-- name: minimal
+-- version: 0.1.0.0
+-- license: BSD-2-Clause
+
+-- $usage
+--
+-- >>> :set -XOverloadedStrings
+-- >>> :set -XOverloadedLabels
+-- >>> import CabalFix
+-- >>> import Optics.Extra
+-- >>> import Data.ByteString.Char8 qualified as C
+-- >>> import CabalFix.Patch
+-- >>> bs = minimalExampleBS
+-- >>> cfg = defaultConfig
+-- >>> (Just cf) = preview (cabalFields' cfg) bs
+-- >>> fs = cf & view (#fields % fieldList')
+-- >>> printCabalFields cfg (cf & over (#fields % fieldList') (take 4)) & C.putStr
+-- cabal-version: 3.0
+-- name: minimal
+-- version: 0.1.0.0
+-- license: BSD-2-Clause
+
+-- | Configuration values for various aspects of (re)rendering a cabal file.
 data Config = Config
   { -- | fields that should be converted to free text
     freeTexts :: [ByteString],
@@ -109,14 +173,39 @@ data Config = Config
 
 -- | An opinionated configuration for formatting cabal files.
 --
--- Some opinions:
+-- Some opinions (that can be configured):
 --
--- 'PrefixCommas' are better for the dependency list as dependency ranges are already noisy enough without a comma thrown in.
 -- >>> fixCommas defaultConfig
 -- [("extra-doc-files",NoCommas,NoTrailer),("build-depends",PrefixCommas,Trailer)]
 --
+-- 'PrefixCommas' are better for the dependency list as dependency ranges are already noisy enough without a comma thrown in. 'Trailer' (which means leading comma for prefixed commas) is neater and easier to prepend to, append to & sort.
 --
+-- If a field list doesn't need commas, then they should be removed.
 --
+-- >>> preferredDeps defaultConfig
+-- [("base",">=4.17 && <5")]
+--
+-- Standard practice compared with the much tighter eg @base ^>=4.17.2.1@
+--
+-- >>> sortFieldLines defaultConfig
+-- ["build-depends","exposed-modules","default-extensions","ghc-options","extra-doc-files","tested-with"]
+--
+-- Sort all the things, but especially the module list.
+--
+-- >>> valueAligned defaultConfig
+-- ValueUnaligned
+--
+-- Adding an extra, long-named field to the cabal file means we have to re-align all the value parts in all the other fields.
+--
+-- >>> depAlignment defaultConfig
+-- DepAligned
+--
+-- build-depends is so busy, however, the extra alignment becomes more important.
+--
+-- >>> doSortFields defaultConfig
+-- True
+--
+-- Whatever the order, fields should have the same order within each section.
 defaultConfig :: Config
 defaultConfig =
   Config
@@ -140,9 +229,9 @@ defaultConfig =
 
 -- | The style for comma-separated values
 data CommaStyle
-  = -- | commas before values, including the first
+  = -- | commas before values
     PrefixCommas
-  | -- | commas after values, including the last
+  | -- | commas after values
     PostfixCommas
   | -- | comma freedom
     FreeformCommas
@@ -150,7 +239,7 @@ data CommaStyle
     NoCommas
   deriving (Eq, Show, Read, Generic)
 
--- | Include a trailing or leading comma
+-- | Include a trailing (or leading) comma, after the last value (or before the first value.)
 data CommaTrail
   = Trailer
   | NoTrailer
@@ -168,9 +257,9 @@ data AddPolicy
 
 defaultFixCommas :: [(ByteString, CommaStyle, CommaTrail)]
 defaultFixCommas =
-    [ ("extra-doc-files", NoCommas, NoTrailer),
-      ("build-depends", PrefixCommas, Trailer)
-    ]
+  [ ("extra-doc-files", NoCommas, NoTrailer),
+    ("build-depends", PrefixCommas, Trailer)
+  ]
 
 -- | An opionated ordering of fields.
 defaultFieldOrdering :: [(ByteString, Double)]
@@ -190,12 +279,15 @@ defaultFieldLineSorts =
 -- An opinionated list of preferred builddeps:
 --
 defaultPreferredDeps :: [(ByteString, ByteString)]
-defaultPreferredDeps = [("base", ">=4.7 && <5")]
+defaultPreferredDeps = [("base", ">=4.17 && <5")]
 
+-- | Whether the value part of each field should be vertically aligned on a column.
 data ValueAlignment = ValueAligned | ValueUnaligned deriving (Eq, Show, Read, Generic)
 
+-- | Whether the range part of the dependency list should be vertically aligned on a column.
 data DepAlignment = DepAligned | DepUnaligned deriving (Eq, Show, Read)
 
+-- | A margin tracker for combining sections.
 data Margin = Margin | NoMargin
   deriving (Eq, Show, Read, Generic)
 
@@ -204,26 +296,28 @@ instance Semigroup Margin where
   NoMargin <> NoMargin = NoMargin
   _ <> _ = Margin
 
+-- | Note that cabal does not have multi-line comments
 type Comment = [ByteString]
 
 -- | 'Field' list annotated with a 'Comment'
 --
--- Note that this information does not contain any position information.
+-- Note that this type does not contain any position information.
 --
--- This construction assumes that comments relate to fields below, so there is potential for an end comment unrelated to any particular field.
+-- The construction assumes that comments relate to fields below, so there is potential for an end comment unrelated to any particular field.
+data CabalFields = CabalFields {fields :: V.Vector (Field Comment), endComment :: Comment} deriving (Generic, Eq, Show)
+
+instance Semigroup CabalFields where
+  (CabalFields fs ec) <> (CabalFields fs' ec') = CabalFields (fs <> fs') (ec <> ec')
+
+instance Monoid CabalFields where
+  mempty = CabalFields V.empty []
+
+-- | iso to flip between vectors and lists easily.
 --
-data CabalFields = CabalFields { fields :: V.Vector (Field Comment), endComment :: Comment } deriving (Generic, Eq, Show)
-
-instance Semigroup CabalFields
-  where
-    (CabalFields fs ec) <> (CabalFields fs' ec') = CabalFields (fs <> fs') (ec <> ec')
-
-instance Monoid CabalFields
-  where
-    mempty = CabalFields V.empty []
-
-fieldList :: Iso' (V.Vector (Field Comment)) [Field Comment]
-fieldList = iso V.toList V.fromList
+-- >>> cf & view (#fields % fieldList') & take 2
+-- [Field (Name [] "cabal-version") [FieldLine [] "3.0"],Field (Name [] "name") [FieldLine [] "minimal"]]
+fieldList' :: Iso' (V.Vector (Field Comment)) [Field Comment]
+fieldList' = iso V.toList V.fromList
 
 instance ToExpr (FieldLine Comment) where
   toExpr fl = Rec "FieldLine" (fromList [("comment", toExpr (fieldLineAnn fl)), ("fieldline", toExpr (fieldLineBS fl))])
@@ -238,73 +332,119 @@ instance ToExpr (SectionArg Comment) where
 
 instance ToExpr (Field Comment) where
   toExpr (Field n fls) = Rec "Field" (fromList [("name", toExpr n), ("field lines", toExpr fls)])
-  toExpr (Section n ss fs) = Rec "Section" (fromList [("name", toExpr n), ("section args", toExpr ss),("fields", toExpr fs)])
+  toExpr (Section n ss fs) = Rec "Section" (fromList [("name", toExpr n), ("section args", toExpr ss), ("fields", toExpr fs)])
 
 instance ToExpr CabalFields where
-  toExpr cf = Rec "CabalFields" (fromList [("fields", toExpr $ fields cf),("extras", toExpr $ endComment cf)])
+  toExpr cf = Rec "CabalFields" (fromList [("fields", toExpr $ fields cf), ("extras", toExpr $ endComment cf)])
 
--- | Error
-data CabalFixWarning
-
--- | A Prism betwixt a ByteString and CabalFields.
+-- | A Prism betwixt a 'ByteString' and a 'CabalFields'.
 --
+-- >>> cf & over (#fields % fieldList') (take 2) & review (cabalFields' cfg) & C.putStr
+-- cabal-version: 3.0
+-- name: minimal
 cabalFields' :: Config -> Prism' ByteString CabalFields
 cabalFields' cfg = prism (printCabalFields cfg) (parseCabalFields cfg)
 
+-- $lenses
+--
+-- Lensing into 'Field' is tricky.
+--
+-- A 'Field' is a sum type of a field constructor or a section constructor, and a section contains fields.
+--
+-- Sometimes you only want to modify a field (and not a section). Other times you want to access a section but not a field. Sometimes you want to modify either a field or a section, and the fields within sections. It can be difficult to remember which lens is which.
+--
+-- The use of a list is also problematic; it is hard to safely delete a field, and invalid cabals are easily represented. A list can easily contain two name fields say, which is an invalid state. It can contain no name which is also invalid. It is difficult, however, to switch to a map because sections contain lists of fields (and not maps of fields).
+--
+-- Most useful are lenses that lens into named fields.
 
--- * lenses
-
--- | First biased lens
+-- | A lens that doesn't descend into sections. It will lens the first-encountered named field, if any.
+--
+-- >>> view (topfield' "name") cf
+-- Just (Field (Name [] "name") [FieldLine [] "minimal"])
+--
+-- >>> view (topfield' "build-depends") cf
+-- Nothing
 topfield' :: FieldName -> Lens' CabalFields (Maybe (Field Comment))
-topfield' name = lens (view (#fields % fieldList % field' name) >>> listToMaybe) (fieldSet name)
+topfield' name = lens (view (#fields % fieldList' % field' name) >>> listToMaybe) (fieldSet name)
 
+fieldSet :: FieldName -> CabalFields -> Maybe (Field Comment) -> CabalFields
+fieldSet name cf f =
+  case V.findIndex ((== name) . getName . fieldName) (view #fields cf) of
+    Just i -> case f of
+      Nothing -> cf & over #fields (\v -> V.take i v <> V.drop (i + 1) v)
+      Just f' -> cf & over #fields (\v -> V.take i v <> V.singleton f' <> V.drop (i + 1) v)
+    Nothing -> cf & maybe id (over #fields . (\f -> (<> V.singleton f))) f
+
+-- | A lens by name into a field (but not a section).
+--
+-- >>> fs & view (field' "version")
+-- [Field (Name [] "version") [FieldLine [] "0.1.0.0"]]
 field' :: FieldName -> Getter [Field Comment] [Field Comment]
 field' name = to (filter (not . isSection) . filter (isName name))
 
+-- | A getter by name into a field (including within sections)
+--
+-- >>> fs & toListOf (each % subfield' "default-language")
+-- [[],[],[],[],[],[],[],[],[Field (Name [] "default-language") [FieldLine [] "GHC2021"]],[Field (Name [] "default-language") [FieldLine [] "GHC2021"]]]
 subfield' :: FieldName -> Getter (Field Comment) [Field Comment]
 subfield' name = to (subfield_ name)
 
 subfield_ :: FieldName -> Field ann -> [Field ann]
 subfield_ name f = filter (isName name) $ fieldUniverse f
 
+-- | A getter of a section (not a field)
+--
+-- >>> fs & foldOf (section' "library" % each % secFields' % field' "exposed-modules")
+-- [Field (Name [] "exposed-modules") [FieldLine [] "MyLib"]]
 section' :: FieldName -> Getter [Field ann] [Field ann]
 section' name = to (filter (\f -> isName name f && isSection f))
 
+-- | A getter of section fields
+secFields' :: Lens' (Field ann) [Field ann]
+secFields' = lens secFieldsView secFieldsSet
+
+secFieldsSet :: Field ann -> [Field ann] -> Field ann
+secFieldsSet f@(Field {}) _ = f
+secFieldsSet (Section n sa _) fs = Section n sa fs
+
+secFieldsView :: Field ann -> [Field ann]
+secFieldsView (Field {}) = []
+secFieldsView (Section _ _ fs) = fs
+
+-- | A getter by name of a field or section.
 fieldOrSection' :: FieldName -> Getter [Field ann] [Field ann]
 fieldOrSection' name = to (filter (isName name))
 
 isName :: FieldName -> Field ann -> Bool
-isName name = (==name) . view fieldName'
+isName name = (== name) . view fieldName'
 
 isSection :: Field ann -> Bool
 isSection (Section {}) = True
 isSection (Field {}) = False
 
--- first element biased, can change name
-fieldSet :: FieldName -> CabalFields -> Maybe (Field Comment) -> CabalFields
-fieldSet name cf f =
-  case V.findIndex ((==name) . getName . fieldName) (view #fields cf) of
-    Just i -> case f of
-      Nothing -> cf & over #fields (\v -> V.take i v <> V.drop (i+1) v)
-      Just f' -> cf & over #fields (\v -> V.take i v <> V.singleton f' <> V.drop (i+1) v)
-    Nothing -> cf & maybe id (over #fields . (\f -> (<> V.singleton f))) f
-
+-- | A mapping into the field structure, operating on field lists in sections as well as the field itself.
 overField :: (Field ann -> Field ann) -> Field ann -> Field ann
 overField f' f@(Field {}) = f' f
 overField f' (Section n sa fs) = Section n sa (fmap (overField f') fs)
 
+-- | A mapping into the field structure, operating on field lists in sections as well as field lists themselves.
 overFields :: ([Field ann] -> [Field ann]) -> [Field ann] -> [Field ann]
 overFields f fs = f $ fmap inner fs
   where
     inner f'@(Field {}) = f'
     inner (Section n sa fs') = Section n sa (overFields f fs')
 
-name' :: AffineTraversal' CabalFields ByteString
-name' = topfield' "name" % _Just % fieldName'
-
+-- | Project name. Errors if the field is missing.
+--
+-- >>> pname cf
+-- "minimal"
 pname :: CabalFields -> ByteString
-pname cf = cf & toListOf name' & listToMaybe & fromMaybe (error "project name missing")
+pname cf = cf & preview (topfield' "name" % _Just % fieldLines' % ix 0 % to fieldLineBS) & fromMaybe (error "no name field")
 
+-- | Name of (field or section).
+--
+-- >>> head fs & view fieldName'
+-- "cabal-version"
 fieldName' :: Lens' (Field ann) ByteString
 fieldName' = lens (fieldName >>> getName) fieldNameSet
   where
@@ -314,6 +454,10 @@ fieldName' = lens (fieldName >>> getName) fieldNameSet
 inNameList :: [ByteString] -> Field ann -> Bool
 inNameList ns f = view fieldName' f `elem` ns
 
+-- | Lens into filed lines
+--
+-- >>> fs & foldOf (section' "test-suite" % each % secFields' % field' "build-depends" % each % fieldLines')
+-- [FieldLine [] "base ^>=4.17.2.1,",FieldLine [] "minimal"]
 fieldLines' :: Lens' (Field ann) [FieldLine ann]
 fieldLines' = lens fieldFieldLinesView fieldFieldLinesSet
 
@@ -326,21 +470,46 @@ fieldFieldLinesSet (Field n _) fls = Field n fls
 fieldFieldLinesSet _ _ = error "setting a section field line"
 
 -- * SectionArg
-secArg' :: Lens' (SectionArg a) (ByteString, ByteString)
-secArg' = lens secArgView secArgSet
 
--- | SectionArg
-secArgView :: SectionArg a -> (ByteString, ByteString)
-secArgView (SecArgName _ n) = ("name", n)
-secArgView (SecArgStr _ n) = ("str", n)
-secArgView (SecArgOther _ n) = ("other", n)
+-- | lens into SectionArg part of a section.
+--
+-- Errors if you actually have a field.
+--
+-- >>> fs & foldOf (section' "test-suite" % each % secArgs')
+-- [SecArgName [] "minimal-test"]
+secArgs' :: Lens' (Field ann) [SectionArg ann]
+secArgs' = lens secArgView secArgSet
 
-secArgSet :: SectionArg ann -> (ByteString, ByteString) -> SectionArg ann
-secArgSet sa (t, a) = case t of
+secArgView :: Field ann -> [SectionArg ann]
+secArgView (Field {}) = error "not a section"
+secArgView (Section _ a _) = a
+
+secArgSet :: Field ann -> [SectionArg ann] -> Field ann
+secArgSet (Field {}) _ = error "not a section"
+secArgSet (Section n _ fs) a = Section n a fs
+
+-- | secArg lens into a ByteString representation
+--
+-- >>> fs & foldOf (section' "test-suite" % each % secArgs' % each % secArgBS')
+-- ("name","minimal-test")
+secArgBS' :: Lens' (SectionArg ann) (ByteString, ByteString)
+secArgBS' = lens secArgBSView secArgBSSet
+
+secArgBSView :: SectionArg a -> (ByteString, ByteString)
+secArgBSView (SecArgName _ n) = ("name", n)
+secArgBSView (SecArgStr _ n) = ("str", n)
+secArgBSView (SecArgOther _ n) = ("other", n)
+
+secArgBSSet :: SectionArg ann -> (ByteString, ByteString) -> SectionArg ann
+secArgBSSet sa (t, a) = case t of
   "name" -> SecArgName (sectionArgAnn sa) a
   "str" -> SecArgStr (sectionArgAnn sa) a
   _ -> SecArgOther (sectionArgAnn sa) a
 
+-- | lens into field line contents.
+--
+-- >>>  fs & toListOf (section' "test-suite" % each % secFields' % field' "build-depends" % each % fieldLines' % each % fieldLine')
+-- ["base ^>=4.17.2.1,","minimal"]
 fieldLine' :: Lens' (FieldLine ann) ByteString
 fieldLine' = lens fieldLineBS setValueFL
   where
@@ -365,17 +534,21 @@ fieldLine' = lens fieldLineBS setValueFL
 -- - sort fields
 fixCabalFields :: Config -> CabalFields -> CabalFields
 fixCabalFields cfg cf =
-  cf & over (#fields % fieldList)
-  ( overFields (filter (not . inNameList (fieldRemovals cfg))) >>>
-    overFields (bool id (filter (not . isBlankField)) (removeBlankFields cfg)) >>>
-    fmap (overField (fixesCommas cfg)) >>>
-    -- FIXME: top fields only
-    addsFields cfg >>>
-    bool id (fmap (fixBuildDeps cfg (pname cf))) (doFixBuildDeps cfg) >>>
-    fmap (overField (sortFieldLinesFor (sortFieldLines cfg))) >>>
-    bool id (overFields (sortFields cfg)) (doSortFields cfg)
-  )
+  cf
+    & over
+      (#fields % fieldList')
+      ( overFields (filter (not . inNameList (fieldRemovals cfg)))
+          >>> overFields (bool id (filter (not . isBlankField)) (removeBlankFields cfg))
+          >>> fmap (overField (fixesCommas cfg))
+          >>>
+          -- FIXME: top fields only
+          addsFields cfg
+          >>> bool id (fmap (overField (fixBuildDeps cfg (pname cf)))) (doFixBuildDeps cfg)
+          >>> fmap (overField (sortFieldLinesFor (sortFieldLines cfg)))
+          >>> bool id (overFields (sortFields cfg)) (doSortFields cfg)
+      )
 
+-- | Fix a cabal file in-place
 fixCabalFile :: FilePath -> Config -> IO Bool
 fixCabalFile fp cfg = do
   bs <- BS.readFile fp
@@ -386,35 +559,45 @@ fixCabalFile fp cfg = do
 
 -- * blank field removal
 
+-- | Is the field blank (including has no section arguments if a section)
 isBlankField :: Field ann -> Bool
 isBlankField (Field _ fs) = null fs
-isBlankField (Section _ _ fss) = null fss
+isBlankField (Section _ sas fss) = null fss && null sas
 
 -- * commas
+
+-- | Fix the comma usage in a field list
+--
+-- >>> fs & toListOf (section' "test-suite" % each % secFields' % field' "build-depends" % each) & fmap (fixesCommas cfg)
+-- [Field (Name [] "build-depends") [FieldLine [] ", base ^>=4.17.2.1",FieldLine [] ", minimal"]]
 fixesCommas :: Config -> Field ann -> Field ann
-fixesCommas cfg x = foldl' (&) x $ fixCommas cfg & fmap (\(n, s, t) -> bool id (fixCommasF s t) ((==n) $ view fieldName' x))
+fixesCommas cfg x = foldl' (&) x $ fixCommas cfg & fmap (\(n, s, t) -> bool id (fixCommasF s t) ((== n) $ view fieldName' x))
 
 addCommaBS :: CommaStyle -> CommaTrail -> [ByteString] -> [ByteString]
 addCommaBS commaStyle trailStyle xs = case trailStyle of
   NoTrailer -> case commaStyle of
     PostfixCommas -> ((<> ",") <$> init xs) <> [last xs]
-    PrefixCommas -> head xs:((", "<>) <$> tail xs)
+    PrefixCommas -> head xs : ((", " <>) <$> tail xs)
     -- since we don't know the prior comma strategy, we just guess here.
     FreeformCommas -> ((<> ",") <$> init xs) <> [last xs]
     NoCommas -> xs
   Trailer -> case commaStyle of
     PostfixCommas -> (<> ",") <$> xs
-    PrefixCommas -> (", "<>) <$> xs
+    PrefixCommas -> (", " <>) <$> xs
     -- since we don't know the prior comma strategy, we just guess here.
     FreeformCommas -> (<> ",") <$> xs
     NoCommas -> xs
 
 stripCommaBS :: ByteString -> ByteString
 stripCommaBS bs =
-  C.stripPrefix ", " bs &
-  fromMaybe (C.stripPrefix "," bs &
-  fromMaybe (C.stripSuffix "," bs &
-  fromMaybe bs))
+  C.stripPrefix ", " bs
+    & fromMaybe
+      ( C.stripPrefix "," bs
+          & fromMaybe
+            ( C.stripSuffix "," bs
+                & fromMaybe bs
+            )
+      )
 
 fixCommasF :: CommaStyle -> CommaTrail -> Field ann -> Field ann
 fixCommasF s t f = fls'
@@ -422,11 +605,14 @@ fixCommasF s t f = fls'
     fls = toListOf (fieldLines' % each % fieldLine') f
     fls' = set fieldLines' (zipWith (set fieldLine') (addCommaBS s t $ fmap stripCommaBS fls) (view fieldLines' f)) f
 
--- * add fields
--- FIXME: top section only
+-- | add fields
+--
+-- >>> addsFields (cfg & set #addFields [("description", "added by addsFields", AddReplace)]) []
+-- [Field (Name [] "description") [FieldLine [] "added by addsFields"]]
 addsFields :: Config -> [Field Comment] -> [Field Comment]
 addsFields cfg x = foldl' (&) x $ addFields cfg & fmap (\(n, v, p) -> addField p (Field (Name [] n) [FieldLine [] v]))
 
+-- | Add a field according to an AddPolicy.
 addField :: AddPolicy -> Field ann -> [Field ann] -> [Field ann]
 addField p f fs = case p of
   AddReplace -> notsames <> [f]
@@ -436,7 +622,10 @@ addField p f fs = case p of
     sames = filter ((view fieldName' f ==) . view fieldName') fs
     notsames = filter ((view fieldName' f /=) . view fieldName') fs
 
--- * fix build-depends
+-- | Align dependencies (if depAlignment is DepAligned), remove ranges for any self-dependency, and substitute preferred dependency ranges.
+--
+-- >>> fs & toListOf (section' "test-suite" % each % secFields' % field' "build-depends" % each) & fmap (fixBuildDeps cfg "minimal")
+-- [Field (Name [] "build-depends") [FieldLine [] ", base    >=4.17 && <5",FieldLine [] ", minimal"]]
 fixBuildDeps :: Config -> FieldName -> Field ann -> Field ann
 fixBuildDeps cfg pname f = overField (bool id (over fieldLines' (fixBDLines cfg pname)) (isName "build-depends" f)) f
 
@@ -444,14 +633,17 @@ fixBDLines :: Config -> ByteString -> [FieldLine ann] -> [FieldLine ann]
 fixBDLines cfg libdep fls = fls'
   where
     align = depAlignment cfg
-    deps = [x| (Right x) <- parseDepFL <$> fls]
+    deps = [x | (Right x) <- parseDepFL <$> fls]
     pds = addCommaBS commaStyle trailStyle $ printDepsPreferred cfg libdep align deps
     fls' = zipWith (set fieldLine') pds fls
 
     (commaStyle, trailStyle) =
-      maybe (PostfixCommas,NoTrailer) (\(_,x,y) -> (x,y))
-      (find ((=="build-depends") . (\(x,_,_) -> x)) (fixCommas cfg))
+      maybe
+        (PostfixCommas, NoTrailer)
+        (\(_, x, y) -> (x, y))
+        (find ((== "build-depends") . (\(x, _, _) -> x)) (fixCommas cfg))
 
+-- | Split of a dependency 'FieldLine' into the dependency name and the range.
 data Dep = Dep {dep :: ByteString, depRange :: ByteString} deriving (Show, Ord, Eq, Generic)
 
 normDepRange :: ByteString -> ByteString
@@ -473,8 +665,7 @@ printDepsPreferred cfg libd DepAligned ds = zipWith (printDepPreferred cfg libd)
 parseDepFL :: FieldLine ann -> Either ByteString Dep
 parseDepFL fl = uncurry Dep <$> runParserEither depP (view fieldLine' fl)
 
--- * sorting field lines
-
+-- | sort field lines for listed fields
 sortFieldLinesFor :: [ByteString] -> Field ann -> Field ann
 sortFieldLinesFor ns f@(Field n fl) =
   Field n (bool fl (List.sortOn fieldLineBS fl) (view fieldName' f `elem` ns))
@@ -483,21 +674,31 @@ sortFieldLinesFor ns (Section n a fss) = Section n a (sortFieldLinesFor ns <$> f
 -- | sorting fields, based on fieldOrdering configuration.
 --
 -- A secondary ordering is based on the first fieldline (for fields) or section args (for sections).
-sortFields:: Config -> [Field ann] -> [Field ann]
+sortFields :: Config -> [Field ann] -> [Field ann]
 sortFields cfg fs = overFields (List.sortOn (\f -> (fromMaybe 100 (Map.lookup (view fieldName' f) (Map.fromList $ fieldOrdering cfg)), name2 f))) fs
 
 name2 :: Field ann -> Maybe ByteString
 name2 (Field _ fl) = listToMaybe (fieldLineBS <$> fl)
-name2 (Section _ a _) = listToMaybe $ snd . view secArg' <$> a
+name2 (Section _ a _) = listToMaybe $ snd . view secArgBS' <$> a
 
--- * Printing
-
+-- | Printing
+--
+-- Convert a 'CabalFields' to a 'ByteString'
+--
+-- >>> printCabalFields cfg (cf & over (#fields % fieldList') (take 4)) & C.putStr
+-- cabal-version: 3.0
+-- name: minimal
+-- version: 0.1.0.0
+-- license: BSD-2-Clause
 printCabalFields :: Config -> CabalFields -> ByteString
 printCabalFields cfg cf =
-  ( C.pack .
-    showFieldsIndent cfg fComment (const id) (indentN cfg) .
-    fmap (fmap (fmap C.unpack)) .
-    printFieldsComments $ view (#fields % fieldList) cf) <> C.unlines (view #endComment cf)
+  ( C.pack
+      . showFieldsIndent cfg fComment (const id) (indentN cfg)
+      . fmap (fmap (fmap C.unpack))
+      . printFieldsComments
+      $ view (#fields % fieldList') cf
+  )
+    <> C.unlines (view #endComment cf)
   where
     fComment [] = NoComment
     fComment xs = CommentBefore xs
@@ -641,18 +842,21 @@ renderField cfg opts@(Opts rann indent post) _ (PrettySection ann name args fiel
       NoComment -> content
 renderField _ _ _ PrettyEmpty = Block NoMargin NoMargin mempty
 
--- * parsing
-
+-- | Parse a 'ByteString' into a 'CabalFields'. Failure is possible.
+--
+-- >>> bs & C.lines & take 4 & C.unlines & parseCabalFields cfg
+-- Right (CabalFields {fields = [Field (Name [] "cabal-version") [FieldLine [] "3.0"],Field (Name [] "name") [FieldLine [] "minimal"],Field (Name [] "version") [FieldLine [] "0.1.0.0"],Field (Name [] "license") [FieldLine [] "BSD-2-Clause"]], endComment = []})
 parseCabalFields :: Config -> ByteString -> Either ByteString CabalFields
 parseCabalFields cfg bs = case readFields bs of
   Left err -> Left $ C.pack (show err)
-  Right fps -> (\(fs,ec) -> Right (CabalFields (V.fromList fs) ec)) $
-    foldl' (&) (fmap (fmap (const [])) fs, []) (uncurry addComment <$> cfs)
+  Right fps ->
+    (\(fs, ec) -> Right (CabalFields (V.fromList fs) ec)) $
+      foldl' (&) (fmap (fmap (const [])) fs, []) (uncurry addComment <$> cfs)
     where
-    fs = convertFreeTexts (view #freeTexts cfg) fps
-    cs = extractComments bs
-    pt = Map.toList $ makePositionTree fs
-    cfs = fmap (first (fmap snd)) (first (fmap (pt List.!!) . (\x -> List.findIndex (\e -> fst e > x) pt)) <$> cs)
+      fs = convertFreeTexts (view #freeTexts cfg) fps
+      cs = extractComments bs
+      pt = Map.toList $ makePositionTree fs
+      cfs = fmap (first (fmap snd)) (first (fmap (pt List.!!) . (\x -> List.findIndex (\e -> fst e > x) pt)) <$> cs)
 
 convertFreeText :: [ByteString] -> Field Position -> Field Position
 convertFreeText freeTexts f@(Field n fls) = bool f (Field n (convertToFreeText fls)) (inNameList freeTexts f)
@@ -752,3 +956,175 @@ addc comments (x : xs) tag fs = take x fs <> [f'] <> drop (x + 1) fs
     (Section n a fss) = (List.!!) fs x
     f' = Section n a (addc comments xs tag fss)
 
+-- | Minimal cabal file contents for testing purposes. Originally created via:
+--
+-- > mkdir minimal && cd minimal && cabal init --minimal --simple --overwrite --lib --tests --language=GHC2021 --license=BSD-2-Clause  -p minimal
+minimalExampleBS :: ByteString
+minimalExampleBS =
+  [i|cabal-version:   3.0
+name:            minimal
+version:         0.1.0.0
+license:         BSD-2-Clause
+license-file:    LICENSE
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+
+common warnings
+    ghc-options: -Wall
+
+library
+    import:           warnings
+    exposed-modules:  MyLib
+    build-depends:    base ^>=4.17.2.1
+    hs-source-dirs:   src
+    default-language: GHC2021
+
+test-suite minimal-test
+    import:           warnings
+    default-language: GHC2021
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Main.hs
+    build-depends:
+        base ^>=4.17.2.1,
+        minimal|]
+
+-- | A config close to the @cabal init@ styles.
+minimalConfig :: Config
+minimalConfig =
+  Config
+    { freeTexts = ["description"],
+      fieldRemovals = [],
+      preferredDeps =
+        [ ( "base",
+            ">=4.17 && <5"
+          )
+        ],
+      addFields = [],
+      fixCommas =
+        [ ( "extra-doc-files",
+            NoCommas,
+            NoTrailer
+          ),
+          ( "build-depends",
+            PostfixCommas,
+            NoTrailer
+          )
+        ],
+      sortFieldLines =
+        [ "build-depends",
+          "exposed-modules",
+          "default-extensions",
+          "ghc-options",
+          "extra-doc-files",
+          "tested-with"
+        ],
+      doSortFields = True,
+      fieldOrdering =
+        [ ( "cabal-version",
+            0.0
+          ),
+          ( "import",
+            1.0
+          ),
+          ( "main-is",
+            2.0
+          ),
+          ( "default-language",
+            8.6
+          ),
+          ( "name",
+            4.0
+          ),
+          ( "hs-source-dirs",
+            8.4
+          ),
+          ( "version",
+            6.0
+          ),
+          ( "build-depends",
+            8.2
+          ),
+          ( "exposed-modules",
+            8.0
+          ),
+          ( "license",
+            9.0
+          ),
+          ( "license-file",
+            10.0
+          ),
+          ( "other-modules",
+            11.0
+          ),
+          ( "copyright",
+            12.0
+          ),
+          ( "category",
+            13.0
+          ),
+          ( "author",
+            14.0
+          ),
+          ( "default-extensions",
+            15.0
+          ),
+          ( "ghc-options",
+            16.0
+          ),
+          ( "maintainer",
+            17.0
+          ),
+          ( "homepage",
+            18.0
+          ),
+          ( "bug-reports",
+            19.0
+          ),
+          ( "synopsis",
+            20.0
+          ),
+          ( "description",
+            21.0
+          ),
+          ( "build-type",
+            22.0
+          ),
+          ( "tested-with",
+            23.0
+          ),
+          ( "extra-doc-files",
+            24.0
+          ),
+          ( "source-repository",
+            25.0
+          ),
+          ( "type",
+            26.0
+          ),
+          ( "common",
+            27.0
+          ),
+          ( "location",
+            28.0
+          ),
+          ( "library",
+            29.0
+          ),
+          ( "executable",
+            30.0
+          ),
+          ( "test-suite",
+            31.0
+          )
+        ],
+      doFixBuildDeps = True,
+      depAlignment = DepAligned,
+      removeBlankFields = True,
+      valueAligned = ValueAligned,
+      valueAlignGap = 1,
+      sectionMargin = Margin,
+      commentMargin = Margin,
+      narrowN = 60,
+      indentN = 4
+    }

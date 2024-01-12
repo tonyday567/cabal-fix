@@ -10,3 +10,4 @@ cabal.project.local*
 /minimal/
 /other/new.cabal
 /other/old.cabal
+/simple/
