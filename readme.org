@@ -1,7 +1,7 @@
 * cabal-fix
 
-[[https://hackage.haskell.org/package/cabal-fixes][https://img.shields.io/hackage/v/cabal-fix.svg]]
-[[https://github.com/tonyday567/cabal-fixes/actions?query=workflow%3Ahaskell-ci][https://github.com/tonyday567/cabal-fix/workflows/haskell-ci/badge.svg]]
+[[https://hackage.haskell.org/package/cabal-fix][https://img.shields.io/hackage/v/cabal-fix.svg]]
+[[https://github.com/tonyday567/cabal-fix/actions?query=workflow%3Ahaskell-ci][https://github.com/tonyday567/cabal-fix/workflows/haskell-ci/badge.svg]]
 
 ~cabal-fix~ helps fix your cabal files. This package:
 
