@@ -6,6 +6,8 @@
 -- | Archive investigation
 module CabalFix.Archive where
 
+import Algebra.Graph
+import Algebra.Graph.ToGraph qualified as ToGraph
 import CabalFix
 import CabalFix.FlatParse (depP, runParser_, untilP)
 import Codec.Archive.Tar qualified as Tar
@@ -19,16 +21,14 @@ import Data.Foldable
 import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
+import Data.Set qualified as Set
 import Distribution.Parsec
 import Distribution.Version
+import DotParse qualified as Dot
 import FlatParse.Basic qualified as FP
 import GHC.Generics
-import System.Directory
 import Optics.Extra
-import qualified Algebra.Graph.ToGraph as ToGraph
-import Data.Set qualified as Set
-import Algebra.Graph
-import DotParse qualified as Dot
+import System.Directory
 
 -- | the cabal index
 cabalIndex :: IO FilePath
@@ -72,13 +72,11 @@ latestCabals = do
     getVersion = fromMaybe undefined . simpleParsecBS . versionFN
 
 -- | Latest successfully parsing 'CabalFields'
-latestCabalFields:: IO (Map.Map ByteString (Version, CabalFields))
+latestCabalFields :: IO (Map.Map ByteString (Version, CabalFields))
 latestCabalFields = do
   lcs <- latestCabals
   let lcs' = second (parseCabalFields (defaultConfig & set #freeTexts [])) <$> lcs
   pure (second (fromRight undefined) <$> Map.filter (snd >>> isRight) lcs')
-
-
 
 -- | extract library build-deps from a Field list, also looking in common stanzas
 libDeps :: CabalFields -> [Dep]
@@ -98,7 +96,7 @@ libDeps cf = deps
 validLibDeps :: Map.Map ByteString CabalFields -> Map.Map ByteString [ByteString]
 validLibDeps cs = ldeps
   where
-    vlls = cs & Map.filter (view (#fields % fieldList' % section' "library") >>> length >>> (>0))
+    vlls = cs & Map.filter (view (#fields % fieldList' % section' "library") >>> length >>> (> 0))
     ldeps' = vlls & fmap (libDeps >>> fmap dep >>> List.nub)
     bdnames = List.nub $ mconcat (snd <$> Map.toList ldeps')
     -- dependencies that do not exist in the main library list
@@ -127,7 +125,6 @@ downstreams :: ByteString -> Graph ByteString -> Set.Set ByteString
 downstreams x g = ToGraph.postSet x g
 
 -- | Get the upstream graph of a library. text, for example:
---
 upstreamG :: ByteString -> Graph ByteString -> Graph ByteString
 upstreamG lib g = induce (`elem` toList supers) g
   where
@@ -144,4 +141,4 @@ dotUpstream g = Dot.dotPrint Dot.defaultDotConfig g'
 --
 -- ![text example](other/textdeps.svg)
 dotUpstreamSvg :: Graph ByteString -> FilePath -> IO ByteString
-dotUpstreamSvg g svg = Dot.processDotWith Dot.Directed ["-Tsvg", "-o"<>svg] (dotUpstream g)
+dotUpstreamSvg g svg = Dot.processDotWith Dot.Directed ["-Tsvg", "-o" <> svg] (dotUpstream g)

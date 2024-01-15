@@ -197,18 +197,15 @@ depP =
     <*> nota ','
     <* optional postfixComma
 
-
 -- | Parse a version bytestring ti an int list.
 versionP :: Parser e [Int]
 versionP = (:) <$> int <*> many ($(char '.') >> int)
 
 -- | A single digit
---
 digit :: Parser e Int
 digit = (\c -> ord c - ord '0') <$> satisfyAscii isDigit
 
 -- | An (unsigned) 'Int' parser
---
 int :: Parser e Int
 int = do
   (place, n) <- chainr (\n (!place, !acc) -> (place * 10, acc + place * n)) digit (pure (1, 0))
