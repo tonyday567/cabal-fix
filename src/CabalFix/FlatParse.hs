@@ -1,4 +1,3 @@
-{-# LANGUAGE DeriveAnyClass #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TemplateHaskell #-}
@@ -29,7 +28,6 @@ module CabalFix.FlatParse
   )
 where
 
-import Control.DeepSeq
 import Data.ByteString (ByteString)
 import Data.ByteString.Char8 qualified as C
 import Data.Char hiding (isDigit)
@@ -60,7 +58,7 @@ runParserEither p bs = case runParser p bs of
   Fail -> Left "uncaught parse error"
 
 -- | Warnings covering leftovers, 'Err's and 'Fail'
-data ParserWarning = ParserLeftover ByteString | ParserError ByteString | ParserUncaught deriving (Eq, Show, Ord, Generic, NFData)
+data ParserWarning = ParserLeftover ByteString | ParserError ByteString | ParserUncaught deriving (Eq, Show, Ord, Generic)
 
 -- | Run parser, returning leftovers and errors as 'ParserWarning's.
 runParserWarn :: Parser ByteString a -> ByteString -> These ParserWarning a

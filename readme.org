@@ -619,16 +619,20 @@ Average number of versions per package
 ** latestCabals to CabalFields map
 
 #+begin_src haskell-ng :results output
-lcs <- latestCabals
+lcs <- latestCabals defaultConfig
 Map.size lcs
-cfg = defaultConfig & set #freeTexts []
+cfg = defaultConfig
 lcs' = fmap (second (parseCabalFields cfg)) lcs
+Map.size $ Map.filter (snd >>> isLeft) lcs'
+:t lcs'
 badParse = Map.filter (isLeft . parseCabalFields cfg . snd) lcs
 Map.size badParse
 #+end_src
 
 #+RESULTS:
 : 17631
+: 6
+: lcs' :: Map.Map ByteString (Version, Either ByteString CabalFields)
 : 6
 ** CabalFields map to dependency graph
 

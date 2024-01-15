@@ -4,7 +4,6 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
-{-# OPTIONS_GHC -Wno-incomplete-patterns #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
@@ -872,23 +871,28 @@ convertFreeText freeTexts (Section n a fss) = Section n a (convertFreeTexts free
 convertFreeTexts :: [ByteString] -> [Field Position] -> [Field Position]
 convertFreeTexts freeTexts fs = snd $ foldl' step (Nothing, []) fs
   where
-    -- FIXME: partial problems here:
     step :: (Maybe (Field Position), [Field Position]) -> Field Position -> (Maybe (Field Position), [Field Position])
-    step (descFP, res) nextFP
-      | isNothing descFP && inNameList freeTexts nextFP = (Just $ convertFreeText freeTexts nextFP, res)
-      | isNothing descFP && not (inNameList freeTexts nextFP) = (Nothing, res <> [nextFP])
-      | isJust descFP && inNameList freeTexts nextFP = (Just $ convertFreeText freeTexts nextFP, res <> [descFP'])
-      | isJust descFP && not (inNameList freeTexts nextFP) = (Nothing, res <> [descFP', nextFP])
+    step (Nothing, res) nextFP = case inNameList freeTexts nextFP of
+      True -> (Just (convertFreeText freeTexts nextFP), res)
+      False -> (Nothing, res <> [nextFP])
+    step (Just freeFP, res) nextFP = case inNameList freeTexts nextFP of
+      True -> (Just (convertFreeText freeTexts nextFP), res <> [freeFP'])
+      False -> (Nothing, res <> [freeFP', nextFP])
       where
-        (Just (Field _ ((FieldLine (Position c0 _) _) : _))) = descFP
-        (Just (Field n fls)) = descFP
+        (Field n fls) = freeFP
         c1 = firstCol nextFP
+        c0 = fromMaybe c1 $ firstColFls freeFP
         (FieldLine ann fls') = fromMaybe (FieldLine (Position 0 0) "") (listToMaybe fls)
-        descFP' = Field n [FieldLine ann (fls' <> C.pack (replicate (c1 - c0 - length (C.lines fls')) '\n'))]
+        freeFP' = Field n [FieldLine ann (fls' <> C.pack (replicate (c1 - c0 - length (C.lines fls')) '\n'))]
 
 firstCol :: Field Position -> Int
 firstCol (Field (Name (Position c _) _) _) = c
 firstCol (Section (Name (Position c _) _) _ _) = c
+
+firstColFls :: Field Position -> Maybe Int
+firstColFls (Field _ []) = Nothing
+firstColFls (Field _ ((FieldLine (Position c _) _) : _)) = Just c
+firstColFls (Section {}) = error "no field lines in a section"
 
 convertToFreeText :: [FieldLine Position] -> [FieldLine Position]
 convertToFreeText [] = []
@@ -940,6 +944,7 @@ addComment Nothing cs (fs, extras) = (fs, extras <> cs)
 addComment (Just (cursor, tag)) cs (fs, extras) = (addc cs cursor tag fs, extras)
 
 addc :: [ByteString] -> [Int] -> String -> [Field [ByteString]] -> [Field [ByteString]]
+addc comments [] _ fs = fs
 addc comments [x] "fieldname" fs = take x fs <> [f'] <> drop (x + 1) fs
   where
     (Field (Name cs n) fls) = (List.!!) fs x

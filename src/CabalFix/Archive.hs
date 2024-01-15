@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# LANGUAGE TypeFamilies #-}
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | Archive investigation
@@ -72,10 +71,10 @@ latestCabals = do
     getVersion = fromMaybe undefined . simpleParsecBS . versionFN
 
 -- | Latest successfully parsing 'CabalFields'
-latestCabalFields :: IO (Map.Map ByteString (Version, CabalFields))
-latestCabalFields = do
+latestCabalFields :: Config -> IO (Map.Map ByteString (Version, CabalFields))
+latestCabalFields cfg = do
   lcs <- latestCabals
-  let lcs' = second (parseCabalFields (defaultConfig & set #freeTexts [])) <$> lcs
+  let lcs' = second (parseCabalFields cfg) <$> lcs
   pure (second (fromRight undefined) <$> Map.filter (snd >>> isRight) lcs')
 
 -- | extract library build-deps from a Field list, also looking in common stanzas

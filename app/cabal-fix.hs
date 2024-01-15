@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
--- | basic measurement and callibration
+-- | cabal-fix app
 module Main where
 
 import CabalFix
