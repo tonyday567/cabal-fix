@@ -308,6 +308,11 @@ mkdir minimal && cd minimal && cabal init --minimal --simple --overwrite --lib -
 
 #+end_example
 
+Compared with the original =cabal init= contents, =cabal-fix=:
+
+- widens the =base= range, in line with standard practice.
+- reorders the =test-suite= section fields, in line with the ordering of the =library= section ones.
+
 #+begin_src sh :results output :exports both
 cabal-fix check -d "minimal" -c "other/minimal.config"
 #+end_src
@@ -334,6 +339,8 @@ Right (Just [
 #+end_example
 
 ** code example
+
+For reference, the code below should produce the same results as the app run above:
 
 #+begin_src haskell-ng :results output :exports both
 :set -XOverloadedStrings
