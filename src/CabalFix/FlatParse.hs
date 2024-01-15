@@ -11,6 +11,7 @@ module CabalFix.FlatParse
     runParserEither,
     runParserWarn,
     runParser_,
+    runParser__,
 
     -- * Flatparse re-exports
     runParser,
@@ -19,6 +20,8 @@ module CabalFix.FlatParse
 
     -- * Parsers
     depP,
+    versionP,
+    versionInts,
     untilP,
     nota,
     ws_,
@@ -81,6 +84,21 @@ runParser_ p bs = case runParser p bs of
   OK a _ -> a
   Fail -> error "uncaught parse error"
 
+-- | Run parser, errors on leftovers & failure.
+--
+-- >>> runParser_ ws " "
+-- ' '
+--
+-- >>> runParser_ ws "x"
+-- *** Exception: uncaught parse error
+-- ...
+runParser__ :: Parser String a -> ByteString -> a
+runParser__ p bs = case runParser p bs of
+  Err e -> error e
+  OK a "" -> a
+  OK _ x -> error $ "leftovers: " <> C.unpack (C.take 20 x)
+  Fail -> error "uncaught parse error"
+
 -- | Consume whitespace.
 --
 -- >>> runParser ws_ " \nx"
@@ -128,6 +146,10 @@ nota :: Char -> Parser e ByteString
 nota c = withSpan (skipMany (satisfy (/= c))) (\() s -> unsafeSpanToByteString s)
 {-# INLINE nota #-}
 
+-- | parse whilst not a specific character, then consume the character.
+--
+-- >>> runParser (untilP 'x') "abcxyz"
+-- OK "abc" "yz"
 untilP :: Char -> Parser e ByteString
 untilP c = nota c <* satisfy (== c)
 
@@ -163,6 +185,7 @@ packageChar =
 validName :: Parser e String
 validName = (:) <$> initialPackageChar <*> many packageChar
 
+-- | Parse a dependency line into a name, range tuple. Consumes any commas it finds.
 depP :: Parser e (ByteString, ByteString)
 depP =
   (,)
@@ -173,3 +196,29 @@ depP =
         )
     <*> nota ','
     <* optional postfixComma
+
+
+-- | Parse a version bytestring ti an int list.
+versionP :: Parser e [Int]
+versionP = (:) <$> int <*> many ($(char '.') >> int)
+
+-- | A single digit
+--
+digit :: Parser e Int
+digit = (\c -> ord c - ord '0') <$> satisfyAscii isDigit
+
+-- | An (unsigned) 'Int' parser
+--
+int :: Parser e Int
+int = do
+  (place, n) <- chainr (\n (!place, !acc) -> (place * 10, acc + place * n)) digit (pure (1, 0))
+  case place of
+    1 -> empty
+    _ -> pure n
+
+-- | partial running of versionP
+--
+-- >>> versionInts "0.6.10.0"
+-- [0,6,10,0]
+versionInts :: ByteString -> [Int]
+versionInts x = runParser__ versionP x

@@ -1,0 +1,26 @@
+digraph {
+    node [height=0.5;shape=box]
+    graph [overlap=false;size="5!";splines=spline]
+    edge [arrowsize=0.5]
+    rankdir="TB"
+    "text" 
+    "template-haskell" 
+    "ghc-prim" 
+    "deepseq" 
+    "bytestring" 
+    "binary" 
+    "array" 
+    "template-haskell" -> "text" 
+    "template-haskell" -> "bytestring" 
+    "ghc-prim" -> "text" 
+    "ghc-prim" -> "template-haskell" 
+    "ghc-prim" -> "bytestring" 
+    "deepseq" -> "text" 
+    "deepseq" -> "bytestring" 
+    "bytestring" -> "text" 
+    "bytestring" -> "binary" 
+    "binary" -> "text" 
+    "array" -> "text" 
+    "array" -> "deepseq" 
+    "array" -> "binary" 
+    }

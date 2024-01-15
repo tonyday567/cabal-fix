@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -46,6 +47,7 @@ module CabalFix
     secArgs',
     secArgBS',
     fieldLine',
+    fieldValues',
 
     -- * Parsing
     parseCabalFields,
@@ -60,6 +62,9 @@ module CabalFix
     addsFields,
     addField,
     fixBuildDeps,
+
+    -- * Dependency
+    Dep (..),
 
     -- * Examples
     minimalExampleBS,
@@ -83,7 +88,7 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe
 import Data.String.Interpolate
 import Data.TreeDiff hiding (FieldName)
-import Data.TreeDiff.OMap
+import Data.TreeDiff.OMap qualified as OMap
 import Data.Vector qualified as V
 import Distribution.Fields
 import Distribution.Fields.Field
@@ -320,22 +325,22 @@ fieldList' :: Iso' (V.Vector (Field Comment)) [Field Comment]
 fieldList' = iso V.toList V.fromList
 
 instance ToExpr (FieldLine Comment) where
-  toExpr fl = Rec "FieldLine" (fromList [("comment", toExpr (fieldLineAnn fl)), ("fieldline", toExpr (fieldLineBS fl))])
+  toExpr fl = Rec "FieldLine" (OMap.fromList [("comment", toExpr (fieldLineAnn fl)), ("fieldline", toExpr (fieldLineBS fl))])
 
 instance ToExpr (Name Comment) where
-  toExpr n = Rec "Name" (fromList [("comment", toExpr (nameAnn n)), ("name", toExpr (getName n))])
+  toExpr n = Rec "Name" (OMap.fromList [("comment", toExpr (nameAnn n)), ("name", toExpr (getName n))])
 
 instance ToExpr (SectionArg Comment) where
-  toExpr (SecArgName c bs) = Rec "SecArgName" (fromList [("comment", toExpr c), ("arg", toExpr bs)])
-  toExpr (SecArgStr c bs) = Rec "SecArgStr" (fromList [("comment", toExpr c), ("arg", toExpr bs)])
-  toExpr (SecArgOther c bs) = Rec "SecArgOther" (fromList [("comment", toExpr c), ("arg", toExpr bs)])
+  toExpr (SecArgName c bs) = Rec "SecArgName" (OMap.fromList [("comment", toExpr c), ("arg", toExpr bs)])
+  toExpr (SecArgStr c bs) = Rec "SecArgStr" (OMap.fromList [("comment", toExpr c), ("arg", toExpr bs)])
+  toExpr (SecArgOther c bs) = Rec "SecArgOther" (OMap.fromList [("comment", toExpr c), ("arg", toExpr bs)])
 
 instance ToExpr (Field Comment) where
-  toExpr (Field n fls) = Rec "Field" (fromList [("name", toExpr n), ("field lines", toExpr fls)])
-  toExpr (Section n ss fs) = Rec "Section" (fromList [("name", toExpr n), ("section args", toExpr ss), ("fields", toExpr fs)])
+  toExpr (Field n fls) = Rec "Field" (OMap.fromList [("name", toExpr n), ("field lines", toExpr fls)])
+  toExpr (Section n ss fs) = Rec "Section" (OMap.fromList [("name", toExpr n), ("section args", toExpr ss), ("fields", toExpr fs)])
 
 instance ToExpr CabalFields where
-  toExpr cf = Rec "CabalFields" (fromList [("fields", toExpr $ fields cf), ("extras", toExpr $ endComment cf)])
+  toExpr cf = Rec "CabalFields" (OMap.fromList [("fields", toExpr $ fields cf), ("extras", toExpr $ endComment cf)])
 
 -- | A Prism betwixt a 'ByteString' and a 'CabalFields'.
 --
@@ -454,7 +459,7 @@ fieldName' = lens (fieldName >>> getName) fieldNameSet
 inNameList :: [ByteString] -> Field ann -> Bool
 inNameList ns f = view fieldName' f `elem` ns
 
--- | Lens into filed lines
+-- | Lens into field lines
 --
 -- >>> fs & foldOf (section' "test-suite" % each % secFields' % field' "build-depends" % each % fieldLines')
 -- [FieldLine [] "base ^>=4.17.2.1,",FieldLine [] "minimal"]
@@ -515,6 +520,10 @@ fieldLine' = lens fieldLineBS setValueFL
   where
     setValueFL (FieldLine ann _) = FieldLine ann
 
+-- | A fold of a field list into a ByteString.
+fieldValues' :: FieldName -> Optic A_Fold '[Int, Int] [Field Comment] [Field Comment] ByteString ByteString
+fieldValues' name = field' name % each % fieldLines' % each % fieldLine'
+
 -- * fixes
 
 -- | fix order:
@@ -540,9 +549,7 @@ fixCabalFields cfg cf =
       ( overFields (filter (not . inNameList (fieldRemovals cfg)))
           >>> overFields (bool id (filter (not . isBlankField)) (removeBlankFields cfg))
           >>> fmap (overField (fixesCommas cfg))
-          >>>
-          -- FIXME: top fields only
-          addsFields cfg
+          >>> addsFields cfg
           >>> bool id (fmap (overField (fixBuildDeps cfg (pname cf)))) (doFixBuildDeps cfg)
           >>> fmap (overField (sortFieldLinesFor (sortFieldLines cfg)))
           >>> bool id (overFields (sortFields cfg)) (doSortFields cfg)
@@ -865,6 +872,7 @@ convertFreeText freeTexts (Section n a fss) = Section n a (convertFreeTexts free
 convertFreeTexts :: [ByteString] -> [Field Position] -> [Field Position]
 convertFreeTexts freeTexts fs = snd $ foldl' step (Nothing, []) fs
   where
+    -- FIXME: partial problems here:
     step :: (Maybe (Field Position), [Field Position]) -> Field Position -> (Maybe (Field Position), [Field Position])
     step (descFP, res) nextFP
       | isNothing descFP && inNameList freeTexts nextFP = (Just $ convertFreeText freeTexts nextFP, res)
@@ -875,7 +883,7 @@ convertFreeTexts freeTexts fs = snd $ foldl' step (Nothing, []) fs
         (Just (Field _ ((FieldLine (Position c0 _) _) : _))) = descFP
         (Just (Field n fls)) = descFP
         c1 = firstCol nextFP
-        (FieldLine ann fls') = head fls
+        (FieldLine ann fls') = fromMaybe (FieldLine (Position 0 0) "") (listToMaybe fls)
         descFP' = Field n [FieldLine ann (fls' <> C.pack (replicate (c1 - c0 - length (C.lines fls')) '\n'))]
 
 firstCol :: Field Position -> Int
