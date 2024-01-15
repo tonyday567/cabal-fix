@@ -187,7 +187,7 @@ data Config = Config
 -- If a field list doesn't need commas, then they should be removed.
 --
 -- >>> preferredDeps defaultConfig
--- [("base",">=4.17 && <5")]
+-- [("base",">=4.14 && <5")]
 --
 -- Standard practice compared with the much tighter eg @base ^>=4.17.2.1@
 --
@@ -283,7 +283,7 @@ defaultFieldLineSorts =
 -- An opinionated list of preferred builddeps:
 --
 defaultPreferredDeps :: [(ByteString, ByteString)]
-defaultPreferredDeps = [("base", ">=4.17 && <5")]
+defaultPreferredDeps = [("base", ">=4.14 && <5")]
 
 -- | Whether the value part of each field should be vertically aligned on a column.
 data ValueAlignment = ValueAligned | ValueUnaligned deriving (Eq, Show, Read, Generic)
@@ -631,7 +631,7 @@ addField p f fs = case p of
 -- | Align dependencies (if depAlignment is DepAligned), remove ranges for any self-dependency, and substitute preferred dependency ranges.
 --
 -- >>> fs & toListOf (section' "test-suite" % each % secFields' % field' "build-depends" % each) & fmap (fixBuildDeps cfg "minimal")
--- [Field (Name [] "build-depends") [FieldLine [] ", base    >=4.17 && <5",FieldLine [] ", minimal"]]
+-- [Field (Name [] "build-depends") [FieldLine [] ", base    >=4.14 && <5",FieldLine [] ", minimal"]]
 fixBuildDeps :: Config -> FieldName -> Field ann -> Field ann
 fixBuildDeps cfg pname f = overField (bool id (over fieldLines' (fixBDLines cfg pname)) (isName "build-depends" f)) f
 
@@ -1010,7 +1010,7 @@ minimalConfig =
       fieldRemovals = [],
       preferredDeps =
         [ ( "base",
-            ">=4.17 && <5"
+            ">=4.14 && <5"
           )
         ],
       addFields = [],
