@@ -1,6 +1,5 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
 
 -- | Archive investigation
 module CabalFix.Archive where
@@ -83,13 +82,13 @@ libDeps cf = deps
   where
     libFields = cf & foldOf (#fields % fieldList' % section' "library" % each % secFields')
     libBds = libFields & foldOf (fieldValues' "build-depends")
-    libDeps = runParser_ (FP.many depP) libBds
+    libDeps' = runParser_ (FP.many depP) libBds
     libImports = libFields & toListOf (fieldValues' "import")
     cs = cf & foldOf (#fields % fieldList' % section' "common")
     libCommons = cs & filter (all (`elem` libImports) . toListOf (secArgs' % each % secArgBS' % _2))
     commonsBds = libCommons & foldOf (fieldValues' "build-depends")
     commonsDeps = runParser_ (FP.many depP) commonsBds
-    deps = fmap (uncurry Dep) (libDeps <> commonsDeps)
+    deps = fmap (uncurry Dep) (libDeps' <> commonsDeps)
 
 -- | Map of valid dependencies
 validLibDeps :: Map.Map ByteString CabalFields -> Map.Map ByteString [ByteString]

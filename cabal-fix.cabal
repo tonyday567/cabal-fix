@@ -6,8 +6,8 @@ license-file: LICENSE
 category: distribution
 author: Tony Day
 maintainer: tonyday567@gmail.com
-homepage: https://github.com/tonyday567/cabal-fixes#readme
-bug-reports: https://github.com/tonyday567/cabal-fixes/issues
+homepage: https://github.com/tonyday567/cabal-fix#readme
+bug-reports: https://github.com/tonyday567/cabal-fix/issues
 synopsis: Fix for cabal files.
 description:
     An executable and library to help fix cabal files and explore cabal.
@@ -23,7 +23,7 @@ extra-doc-files:
 
 source-repository head
     type: git
-    location: https://github.com/tonyday567/cabal-fixes
+    location: https://github.com/tonyday567/cabal-fix
 
 common ghc-options-exe-stanza
     ghc-options:

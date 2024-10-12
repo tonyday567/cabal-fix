@@ -1,16 +1,13 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DerivingStrategies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
-{-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
-{-# OPTIONS_GHC -Wno-unused-matches #-}
 {-# OPTIONS_GHC -Wno-x-partial #-}
 
--- | Tools to print, parse and fix cabal files, 'ByteString' and 'Field' lists.
+-- | Tools to print, parse and fix cabal files.
 module CabalFix
   ( -- * Usage
     -- $usage
@@ -376,10 +373,10 @@ topfield' name = lens (view (#fields % fieldList' % field' name) >>> listToMaybe
 fieldSet :: FieldName -> CabalFields -> Maybe (Field Comment) -> CabalFields
 fieldSet name cf f =
   case V.findIndex ((== name) . getName . fieldName) (view #fields cf) of
-    Just i -> case f of
-      Nothing -> cf & over #fields (\v -> V.take i v <> V.drop (i + 1) v)
-      Just f' -> cf & over #fields (\v -> V.take i v <> V.singleton f' <> V.drop (i + 1) v)
-    Nothing -> cf & maybe id (over #fields . (\f -> (<> V.singleton f))) f
+    Just i' -> case f of
+      Nothing -> cf & over #fields (\v -> V.take i' v <> V.drop (i' + 1) v)
+      Just f' -> cf & over #fields (\v -> V.take i' v <> V.singleton f' <> V.drop (i' + 1) v)
+    Nothing -> cf & maybe id (over #fields . (\x -> (<> V.singleton x))) f
 
 -- | A lens by name into a field (but not a section).
 --
@@ -635,7 +632,7 @@ addField p f fs = case p of
 -- >>> fs & toListOf (section' "test-suite" % each % secFields' % field' "build-depends" % each) & fmap (fixBuildDeps cfg "minimal")
 -- [Field (Name [] "build-depends") [FieldLine [] ", base    >=4.14 && <5",FieldLine [] ", minimal"]]
 fixBuildDeps :: Config -> FieldName -> Field ann -> Field ann
-fixBuildDeps cfg pname f = overField (bool id (over fieldLines' (fixBDLines cfg pname)) (isName "build-depends" f)) f
+fixBuildDeps cfg pn f = overField (bool id (over fieldLines' (fixBDLines cfg pn)) (isName "build-depends" f)) f
 
 fixBDLines :: Config -> ByteString -> [FieldLine ann] -> [FieldLine ann]
 fixBDLines cfg libdep fls = fls'
@@ -858,7 +855,7 @@ parseCabalFields :: Config -> ByteString -> Either ByteString CabalFields
 parseCabalFields cfg bs = case readFields bs of
   Left err -> Left $ C.pack (show err)
   Right fps ->
-    (\(fs, ec) -> Right (CabalFields (V.fromList fs) ec)) $
+    (\(fs', ec) -> Right (CabalFields (V.fromList fs') ec)) $
       foldl' (&) (fmap (fmap (const [])) fs, []) (uncurry addComment <$> cfs)
     where
       fs = convertFreeTexts (view #freeTexts cfg) fps
@@ -927,7 +924,7 @@ data FieldPath
 makePositionTree :: [Field Position] -> Map.Map Int ([Int], String)
 makePositionTree fs = foldFss Map.empty [] fs
   where
-    foldFss m cursor fs = fst $ foldl' stepFss (m, cursor <> [0]) fs
+    foldFss m cursor fs' = fst $ foldl' stepFss (m, cursor <> [0]) fs'
     stepFss (m, cursor) (Field (Name (Position c _) _) fls) =
       (foldFls (Map.insertWith (\_ o -> o) c (cursor, "fieldname") m) cursor fls, inc cursor)
     stepFss (m, cursor) (Section (Name (Position c _) _) sas fss) =
@@ -946,7 +943,7 @@ addComment Nothing cs (fs, extras) = (fs, extras <> cs)
 addComment (Just (cursor, tag)) cs (fs, extras) = (addc cs cursor tag fs, extras)
 
 addc :: [ByteString] -> [Int] -> String -> [Field [ByteString]] -> [Field [ByteString]]
-addc comments [] _ fs = fs
+addc _ [] _ fs = fs
 addc comments [x] "fieldname" fs = take x fs <> [f'] <> drop (x + 1) fs
   where
     (Field (Name cs n) fls) = (List.!!) fs x
