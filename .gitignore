@@ -11,3 +11,4 @@ cabal.project.local*
 /other/new.cabal
 /other/old.cabal
 /simple/
+/checklist.org

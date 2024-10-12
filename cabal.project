@@ -1,3 +1,4 @@
 packages:
   cabal-fix.cabal
 
+write-ghc-environment-files: always
