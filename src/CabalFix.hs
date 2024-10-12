@@ -8,6 +8,7 @@
 {-# OPTIONS_GHC -Wno-name-shadowing #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-unused-matches #-}
+{-# OPTIONS_GHC -Wno-x-partial #-}
 
 -- | Tools to print, parse and fix cabal files, 'ByteString' and 'Field' lists.
 module CabalFix
@@ -104,6 +105,7 @@ import Prelude
 --
 -- >>> :set -XOverloadedStrings
 -- >>> :set -XOverloadedLabels
+-- >>> :set -Wno-x-partial
 -- >>> import CabalFix
 -- >>> import Optics.Extra
 -- >>> import Data.ByteString.Char8 qualified as C
@@ -725,7 +727,7 @@ prettyFieldLines _ fls =
   PP.vcat $
     mconcat $
       [ PP.text . fromUTF8BS <$> cs <> [bs]
-        | FieldLine cs bs <- fls
+      | FieldLine cs bs <- fls
       ]
 
 -- | Used in 'fromParsecFields'.
