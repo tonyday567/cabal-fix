@@ -1,13 +1,14 @@
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 
--- | Archive investigation
-module CabalFix.Archive where
+-- | Archive exploration tools
+--
+-- This module is an unstable part of the API, meant to be helpful for exploration of dependencies as represented in cabal files and the cabal archive file. It may be revised, deleted or made stable in future iterations of the library.
+module CabalFix.Internal.Archive where
 
 import Algebra.Graph
 import Algebra.Graph.ToGraph qualified as ToGraph
 import CabalFix
-import CabalFix.FlatParse (depP, runParser_, untilP)
 import Codec.Archive.Tar qualified as Tar
 import Control.Category ((>>>))
 import Data.Bifunctor
@@ -23,6 +24,7 @@ import Data.Set qualified as Set
 import Distribution.Parsec
 import Distribution.Version
 import DotParse qualified as Dot
+import FlatParse.Basic (Parser, Result(..))
 import FlatParse.Basic qualified as FP
 import GHC.Generics
 import Optics.Extra
@@ -42,6 +44,18 @@ cabalEntries = entryList . Tar.read <$> (BSL.readFile =<< cabalIndex)
 
 -- | The naming convention in 01-index.tar
 data FileName = FileName {nameFN :: ByteString, versionFN :: ByteString, filenameFN :: ByteString} deriving (Generic, Eq, Ord, Show)
+
+runParser_ :: Parser String a -> ByteString -> a
+runParser_ p bs = case FP.runParser p bs of
+  Err e -> error e
+  OK a _ -> a
+  Fail -> error "uncaught parse error"
+
+nota :: Char -> Parser e ByteString
+nota c = FP.withSpan (FP.skipMany (FP.satisfy (/= c))) (\() s -> FP.unsafeSpanToByteString s)
+
+untilP :: Char -> Parser e ByteString
+untilP c = nota c <* FP.satisfy (== c)
 
 -- | Convert a ByteString to a FileName. Errors on failure.
 filename :: ByteString -> FileName
@@ -64,7 +78,7 @@ cabals = do
 -- latest valid one.
 latestCabals :: IO (Map.Map ByteString (Version, ByteString))
 latestCabals = do
-  cs <- CabalFix.Archive.cabals
+  cs <- CabalFix.Internal.Archive.cabals
   pure $ Map.fromListWith (\new old -> bool old new (fst new >= fst old)) $ (\(fn, bs) -> (nameFN fn, (getVersion fn, bs))) <$> cs
   where
     getVersion = fromMaybe undefined . simpleParsecBS . versionFN

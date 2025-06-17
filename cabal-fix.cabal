@@ -1,6 +1,6 @@
 cabal-version: 3.0
 name: cabal-fix
-version: 0.1.0.0
+version: 0.2.0.0
 license: BSD-3-Clause
 license-file: LICENSE
 category: distribution
@@ -59,17 +59,12 @@ library
         , flatparse          >=0.3 && <0.6
         , optics-extra       >=0.4 && <0.5
         , pretty             >=1.1 && <1.2
-        , pretty-simple      >=4.1 && <4.2
         , string-interpolate >=0.3 && <0.4
         , tar                >=0.5 && <0.7
-        , these              >=1.2 && <1.3
-        , tree-diff          >=0.3 && <0.4
         , vector             >=0.13 && <0.14
     exposed-modules:
         CabalFix
-        CabalFix.Archive
-        CabalFix.FlatParse
-        CabalFix.Patch
+        CabalFix.Internal.Archive
 
 executable cabal-fix
     import: ghc-options-exe-stanza
@@ -78,15 +73,15 @@ executable cabal-fix
     main-is: cabal-fix.hs
     hs-source-dirs: app
     build-depends:
+        , Diff                 >=1.0 && <1.1
         , base                 >=4.14 && <5
         , bytestring           >=0.11 && <0.13
         , cabal-fix
         , directory            >=1.3 && <1.4
         , filepath             >=1.4 && <1.6
-        , optparse-applicative >=0.17 && <0.19
+        , optparse-applicative >=0.17 && <0.20
         , pretty-simple        >=4.1 && <4.2
         , text                 >=2.0 && <2.2
-        , tree-diff            >=0.3 && <0.4
 
 test-suite doctests
     import: ghc2021-stanza
