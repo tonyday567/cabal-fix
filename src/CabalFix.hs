@@ -1,3 +1,5 @@
+
+{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
@@ -63,13 +65,17 @@ module CabalFix
     -- * Dependency
     Dep (..),
 
+    -- * low-level parsing
+    runParser,
+    depP,
+    versionP,
+
     -- * Examples
     minimalExampleBS,
     minimalConfig,
   )
 where
 
-import CabalFix.FlatParse (depP, runParserEither)
 import Control.Category ((>>>))
 import Control.Monad
 import Data.Bifunctor
@@ -84,8 +90,6 @@ import Data.List qualified as List
 import Data.Map.Strict qualified as Map
 import Data.Maybe
 import Data.String.Interpolate
-import Data.TreeDiff hiding (FieldName)
-import Data.TreeDiff.OMap qualified as OMap
 import Data.Vector qualified as V
 import Distribution.Fields
 import Distribution.Fields.Field
@@ -97,6 +101,8 @@ import GHC.Generics hiding (to)
 import Optics.Extra
 import Text.PrettyPrint qualified as PP
 import Prelude
+import FlatParse.Basic hiding (take)
+import Data.Char (ord)
 
 -- $setup
 --
@@ -106,7 +112,7 @@ import Prelude
 -- >>> import CabalFix
 -- >>> import Optics.Extra
 -- >>> import Data.ByteString.Char8 qualified as C
--- >>> import CabalFix.Patch
+-- >>> import FlatParse.Basic (Result(..))
 -- >>> bs = minimalExampleBS
 -- >>> cfg = defaultConfig
 -- >>> (Just cf) = preview (cabalFields' cfg) bs
@@ -124,7 +130,6 @@ import Prelude
 -- >>> import CabalFix
 -- >>> import Optics.Extra
 -- >>> import Data.ByteString.Char8 qualified as C
--- >>> import CabalFix.Patch
 -- >>> bs = minimalExampleBS
 -- >>> cfg = defaultConfig
 -- >>> (Just cf) = preview (cabalFields' cfg) bs
@@ -191,7 +196,7 @@ data Config = Config
 -- Standard practice compared with the much tighter eg @base ^>=4.17.2.1@
 --
 -- >>> sortFieldLines defaultConfig
--- ["build-depends","exposed-modules","default-extensions","ghc-options","extra-doc-files","tested-with"]
+-- ["build-depends","exposed-modules","default-extensions","ghc-options","extra-doc-files"]
 --
 -- Sort all the things, but especially the module list.
 --
@@ -275,8 +280,7 @@ defaultFieldLineSorts =
     "exposed-modules",
     "default-extensions",
     "ghc-options",
-    "extra-doc-files",
-    "tested-with"
+    "extra-doc-files"
   ]
 
 -- An opinionated list of preferred builddeps:
@@ -321,24 +325,6 @@ instance Monoid CabalFields where
 -- [Field (Name [] "cabal-version") [FieldLine [] "3.0"],Field (Name [] "name") [FieldLine [] "minimal"]]
 fieldList' :: Iso' (V.Vector (Field Comment)) [Field Comment]
 fieldList' = iso V.toList V.fromList
-
-instance ToExpr (FieldLine Comment) where
-  toExpr fl = Rec "FieldLine" (OMap.fromList [("comment", toExpr (fieldLineAnn fl)), ("fieldline", toExpr (fieldLineBS fl))])
-
-instance ToExpr (Name Comment) where
-  toExpr n = Rec "Name" (OMap.fromList [("comment", toExpr (nameAnn n)), ("name", toExpr (getName n))])
-
-instance ToExpr (SectionArg Comment) where
-  toExpr (SecArgName c bs) = Rec "SecArgName" (OMap.fromList [("comment", toExpr c), ("arg", toExpr bs)])
-  toExpr (SecArgStr c bs) = Rec "SecArgStr" (OMap.fromList [("comment", toExpr c), ("arg", toExpr bs)])
-  toExpr (SecArgOther c bs) = Rec "SecArgOther" (OMap.fromList [("comment", toExpr c), ("arg", toExpr bs)])
-
-instance ToExpr (Field Comment) where
-  toExpr (Field n fls) = Rec "Field" (OMap.fromList [("name", toExpr n), ("field lines", toExpr fls)])
-  toExpr (Section n ss fs) = Rec "Section" (OMap.fromList [("name", toExpr n), ("section args", toExpr ss), ("fields", toExpr fs)])
-
-instance ToExpr CabalFields where
-  toExpr cf = Rec "CabalFields" (OMap.fromList [("fields", toExpr $ fields cf), ("extras", toExpr $ endComment cf)])
 
 -- | A Prism betwixt a 'ByteString' and a 'CabalFields'.
 --
@@ -667,6 +653,13 @@ printDepsPreferred cfg libd DepAligned ds = zipWith (printDepPreferred cfg libd)
     ls = BS.length . dep <$> ds
     ns = (\x -> maximum ls - x + 1) <$> ls
 
+-- | Run a Parser, throwing away leftovers. Returns Left on 'Fail' or 'Err'.
+runParserEither :: Parser ByteString a -> ByteString -> Either ByteString a
+runParserEither p bs = case runParser p bs of
+  Err e -> Left e
+  OK a _ -> Right a
+  Fail -> Left "uncaught parse error"
+
 parseDepFL :: FieldLine ann -> Either ByteString Dep
 parseDepFL fl = uncurry Dep <$> runParserEither depP (view fieldLine' fl)
 
@@ -853,7 +846,7 @@ renderField _ _ _ PrettyEmpty = Block NoMargin NoMargin mempty
 -- Right (CabalFields {fields = [Field (Name [] "cabal-version") [FieldLine [] "3.0"],Field (Name [] "name") [FieldLine [] "minimal"],Field (Name [] "version") [FieldLine [] "0.1.0.0"],Field (Name [] "license") [FieldLine [] "BSD-2-Clause"]], endComment = []})
 parseCabalFields :: Config -> ByteString -> Either ByteString CabalFields
 parseCabalFields cfg bs = case readFields bs of
-  Left err -> Left $ C.pack (show err)
+  Left e -> Left $ C.pack (show e)
   Right fps ->
     (\(fs', ec) -> Right (CabalFields (V.fromList fs') ec)) $
       foldl' (&) (fmap (fmap (const [])) fs, []) (uncurry addComment <$> cfs)
@@ -1140,3 +1133,83 @@ minimalConfig =
       narrowN = 60,
       indentN = 4
     }
+
+
+-- * parsing
+
+-- | Parse a dependency line into a name, range tuple. Consumes any commas it finds.
+depP :: Parser e (ByteString, ByteString)
+depP =
+  (,)
+    <$> ( optional prefixComma
+            *> ws_
+            *> byteStringOf validName
+            <* ws_
+        )
+    <*> nota ','
+    <* optional postfixComma
+  where
+    nota c = withSpan (skipMany (satisfy (/= c))) (\() s -> unsafeSpanToByteString s)
+
+-- | A single digit
+digit :: Parser e Int
+digit = (\c -> ord c - ord '0') <$> satisfyAscii isDigit
+
+-- | An (unsigned) 'Int' parser
+int :: Parser e Int
+int = do
+  (place, n) <- chainr (\n (!place, !acc) -> (place * 10, acc + place * n)) digit (pure (1, 0))
+  case place of
+    1 -> empty
+    _ -> pure n
+
+-- | Parse a version bytestring to an int list.
+versionP :: Parser e [Int]
+versionP = (:) <$> int <*> many ($(char '.') >> int)
+
+initialPackageChar :: Parser e Char
+initialPackageChar =
+  satisfyAscii
+    ( `C.elem`
+        ( C.pack $
+            ['a' .. 'z']
+              <> ['A' .. 'Z']
+              <> ['0' .. '9']
+        )
+    )
+
+packageChar :: Parser e Char
+packageChar =
+  satisfyAscii
+    ( `C.elem`
+        ( C.pack $
+            ['a' .. 'z']
+              <> ['A' .. 'Z']
+              <> ['-']
+              <> ['0' .. '9']
+        )
+    )
+
+validName :: Parser e String
+validName = (:) <$> initialPackageChar <*> many packageChar
+
+prefixComma :: Parser e ()
+prefixComma = $(char ',') >> ws_
+
+postfixComma :: Parser e ()
+postfixComma = ws_ >> $(char ',')
+
+ws_ :: Parser e ()
+ws_ =
+  $( switch
+       [|
+         case _ of
+           " " -> ws_
+           "\n" -> ws_
+           "\t" -> ws_
+           "\r" -> ws_
+           "\f" -> ws_
+           _ -> pure ()
+         |]
+   )
+
