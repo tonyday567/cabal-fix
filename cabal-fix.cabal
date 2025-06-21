@@ -64,7 +64,6 @@ library
         , vector             >=0.13 && <0.14
     exposed-modules:
         CabalFix
-        CabalFix.Internal.Archive
 
 executable cabal-fix
     import: ghc-options-exe-stanza

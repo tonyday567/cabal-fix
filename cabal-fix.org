@@ -5,10 +5,9 @@
 
 ~cabal-fix~ helps fix your cabal files. This package:
 
-- Contains an app which parses your existing cabal file, re-renders it according to some config, then either displays a diff or alters your cabal file, in-place.
+- Contains an app which parses an existing cabal file, re-renders it according to some config, then either displays a diff or alters your cabal file in-place.
 - Is an idempotent parser of a cabal file or ByteString, into the ~Field~ type used in Cabal.
 - Is an inexact printer.
-- Contains code to explore the cabal index archive at the base of your cabal installation.
 
 * App Usage
 

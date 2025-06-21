@@ -12,10 +12,15 @@ import CabalFix
     parseCabalFields,
     printCabalFields,
   )
+import Control.Category ((>>>))
 import Control.Monad
+import Data.Algorithm.Diff
+import Data.Algorithm.DiffOutput
+import Data.Bifunctor
 import Data.Bool
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as C
+import Data.Function ((&))
 import Data.Text.Lazy.IO qualified as Text
 import GHC.Generics
 import Options.Applicative
@@ -23,12 +28,6 @@ import System.Directory
 import System.FilePath
 import Text.Pretty.Simple
 import Prelude
-import Data.Algorithm.DiffOutput
-import Data.Algorithm.Diff
-import Data.Function ((&))
-import Control.Category ((>>>))
-import Data.Bifunctor
-
 
 data CommandType = FixInplace | FixCheck | GenerateConfig deriving (Generic, Eq, Show)
 
@@ -85,7 +84,6 @@ runCabalFix o = do
       print $ ediff bs <$> bs'
 
 ediff expected actual = getDiff (C.lines expected) (C.lines actual) & fmap (bimap (C.unpack >>> pure) (C.unpack >>> pure)) & diffToLineRanges & prettyDiffs
-
 
 getConfig :: Options -> IO Config
 getConfig o = do

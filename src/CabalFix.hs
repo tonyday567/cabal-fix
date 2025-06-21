@@ -1,10 +1,9 @@
-
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedLabels #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE QuasiQuotes #-}
+{-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -Wno-incomplete-uni-patterns #-}
 {-# OPTIONS_GHC -Wno-orphans #-}
 {-# OPTIONS_GHC -Wno-x-partial #-}
@@ -29,6 +28,7 @@ module CabalFix
     CabalFields (..),
     cabalFields',
     fieldList',
+    isSection,
 
     -- * Lenses
     -- $lenses
@@ -83,6 +83,7 @@ import Data.Bool
 import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import Data.ByteString.Char8 qualified as C
+import Data.Char (ord)
 import Data.Foldable
 import Data.Function
 import Data.Functor.Identity
@@ -97,12 +98,11 @@ import Distribution.Parsec
 import Distribution.Pretty
 import Distribution.Utils.Generic
 import Distribution.Version
+import FlatParse.Basic hiding (take)
 import GHC.Generics hiding (to)
 import Optics.Extra
 import Text.PrettyPrint qualified as PP
 import Prelude
-import FlatParse.Basic hiding (take)
-import Data.Char (ord)
 
 -- $setup
 --
@@ -1134,7 +1134,6 @@ minimalConfig =
       indentN = 4
     }
 
-
 -- * parsing
 
 -- | Parse a dependency line into a name, range tuple. Consumes any commas it finds.
@@ -1212,4 +1211,3 @@ ws_ =
            _ -> pure ()
          |]
    )
-
